@@ -1,0 +1,6 @@
+{
+  "name": "Presensi Pintar",
+  "description": "Sistem presensi sidik jari real-time dengan dashboard pengelolaan data karyawan dan log kehadiran berbasis NodeMCU.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

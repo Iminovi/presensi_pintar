@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "Employee": {
+      "title": "Employee",
+      "description": "Employee details and their mapped fingerprint ID.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name of the employee"
+        },
+        "fingerprintId": {
+          "type": "integer",
+          "description": "The ID stored in the fingerprint scanner (1-127 usually)"
+        },
+        "position": {
+          "type": "string",
+          "description": "Job title or department"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["name", "fingerprintId"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "A single attendance log record.",
+      "type": "object",
+      "properties": {
+        "employeeId": {
+          "type": "string",
+          "description": "Reference to the employee document ID"
+        },
+        "employeeName": {
+          "type": "string",
+          "description": "Denormalized name for easier display"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["in", "out"],
+          "description": "Clock in or clock out"
+        }
+      },
+      "required": ["employeeId", "timestamp", "type"]
+    },
+    "DeviceConfig": {
+      "title": "DeviceConfig",
+      "description": "Configuration and status for the NodeMCU device.",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["idle", "enroll", "verify"],
+          "description": "Current operating mode of the device"
+        },
+        "enrollTargetId": {
+          "type": "integer",
+          "description": "The fingerprint ID to enroll next"
+        },
+        "lastActive": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "message": {
+          "type": "string",
+          "description": "Status message to display on device (if it has an LCD)"
+        }
+      }
+    }
+  },
+  "firestore": {
+    "employees": {
+      "schema": "Employee",
+      "description": "List of registered employees"
+    },
+    "attendance": {
+      "schema": "Attendance",
+      "description": "History of attendance logs"
+    },
+    "deviceConfigs": {
+      "schema": "DeviceConfig",
+      "description": "Device-specific settings (usually just one document)"
+    }
+  }
+}

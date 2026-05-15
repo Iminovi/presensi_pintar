@@ -1,0 +1,71 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Helper for Employee validation
+    function isValidEmployee(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.fingerprintId is int && data.fingerprintId >= 0 && data.fingerprintId <= 500 &&
+             (!('position' in data) || (data.position is string && data.position.size() <= 100));
+    }
+
+    // Helper for Attendance validation
+    function isValidAttendance(data) {
+      return data.employeeId is string && data.employeeId.size() > 0 &&
+             data.employeeName is string && data.type in ['in', 'out'] &&
+             data.timestamp is timestamp;
+    }
+
+    // Helper for DeviceConfig validation
+    function isValidDeviceConfig(data) {
+      return data.mode in ['idle', 'enroll', 'verify'] &&
+             (!('enrollTargetId' in data) || data.enrollTargetId is int) &&
+             (!('message' in data) || data.message is string);
+    }
+
+    // Employees collection
+    match /employees/{employeeId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidEmployee(incoming()) && (incoming().createdAt == request.time);
+      allow update: if isSignedIn() && isValidEmployee(incoming()) && 
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'fingerprintId', 'position']);
+      allow delete: if isSignedIn();
+    }
+
+    // Attendance collection
+    match /attendance/{attendanceId} {
+      allow read: if isSignedIn();
+      // Attendance can be created by signed-in admin or eventually via a service account/privileged client
+      // For this app, we assume the UI handles the "admin" role for simplicity as requested "rakit sendiri"
+      allow create: if isSignedIn() && isValidAttendance(incoming());
+      allow update, delete: if isSignedIn(); 
+    }
+
+    // Device Configs
+    match /deviceConfigs/{configId} {
+      allow read: if true; // Device needs to read its config without auth (unless we use secret tokens, but for DIY we keep it simple)
+      allow write: if isSignedIn() && isValidDeviceConfig(incoming());
+    }
+  }
+}
