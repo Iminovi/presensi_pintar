@@ -23,8 +23,8 @@ Berikut adalah contoh skrip Arduino untuk NodeMCU (ESP8266) yang terintegrasi de
 #define WIFI_PASSWORD "PASSWORD_WIFI_ANDA"
 
 // 2. Konfigurasi Firebase (Ambil dari file firebase-applet-config.json)
-#define API_KEY "AIzaSyA3EAWDG7PmJY8fn9uRTLptkrp9RiO3gS8"
-#define FIREBASE_PROJECT_ID "gen-lang-client-0118775089"
+#define API_KEY "YOUR_FIREBASE_API_KEY" // <-- GANTI DENGAN API KEY ANDA, JANGAN DI-COMMIT KE GITHUB
+#define FIREBASE_PROJECT_ID "YOUR_FIREBASE_PROJECT_ID" // <-- GANTI DENGAN PROJECT ID ANDA
 
 // 3. Pin Fingerprint
 SoftwareSerial mySerial(4, 0); // D2=4, D3=0
