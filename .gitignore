@@ -1,8 +1,23 @@
+# Dependencies
 node_modules/
-build/
+
+# Build output
 dist/
-coverage/
+build/
+
+# Environment variables (Penting agar API Key aman!)
+.env
+.env.local
+.env.production
+
+# Editor directories and files
+.vscode/
+.idea/
+
+# OS generated files
 .DS_Store
-*.log
-.env*
-!.env.example
+Thumbs.db
+
+# Firebase config
+firebase-applet-config.json
+firebase-debug.log
