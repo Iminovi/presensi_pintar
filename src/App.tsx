@@ -82,9 +82,9 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0f172a] text-slate-100 flex flex-col md:flex-row">
+    <div className="min-h-screen bg-[#0f172a] text-slate-100 flex flex-col md:flex-row print:bg-white print:text-black">
       {/* Sidebar */}
-      <nav className="w-full md:w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between">
+      <nav className="w-full md:w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between print:hidden">
         <div>
           <div className="flex items-center gap-3 mb-10">
             <div className="bg-cyan-500 p-2 rounded-xl">
@@ -133,8 +133,8 @@ export default function App() {
       </nav>
 
       {/* Main Content */}
-      <main className="flex-1 p-6 md:p-12 overflow-y-auto">
-        <header className="mb-10">
+      <main className="flex-1 p-6 md:p-12 overflow-y-auto print:p-0 print:overflow-visible">
+        <header className="mb-10 print:hidden">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-[10px] uppercase tracking-[0.2em] font-mono text-slate-500 mb-1">DASHBOARD</p>
