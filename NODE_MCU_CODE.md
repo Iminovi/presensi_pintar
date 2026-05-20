@@ -26,6 +26,10 @@ Berikut adalah contoh skrip Arduino untuk NodeMCU (ESP8266) yang terintegrasi de
 #define API_KEY "YOUR_FIREBASE_API_KEY" // <-- GANTI DENGAN API KEY ANDA, JANGAN DI-COMMIT KE GITHUB
 #define FIREBASE_PROJECT_ID "YOUR_FIREBASE_PROJECT_ID" // <-- GANTI DENGAN PROJECT ID ANDA
 
+// 3. Konfigurasi Pin Indikator (Buzzer & LED)
+#define BUZZER_PIN 5 // D1 pada NodeMCU
+#define LED_PIN LED_BUILTIN // Menggunakan LED bawaan NodeMCU (biasanya aktif LOW)
+
 // 3. Pin Fingerprint
 SoftwareSerial mySerial(4, 0); // D2=4, D3=0
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
@@ -36,6 +40,12 @@ FirebaseConfig config;
 
 void setup() {
   Serial.begin(115200);
+  
+  // Setup Pin Indikator
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW); // Pastikan buzzer mati di awal
+  digitalWrite(LED_PIN, HIGH);   // Matikan LED bawaan (HIGH = mati untuk LED built-in ESP8266)
   
   // Connect WiFi
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -59,15 +69,37 @@ void loop() {
   // Ambil mode dari Firestore
   String path = "deviceConfigs/main-nodedcu";
   if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", path.c_str(), "")) {
-    // Logic untuk switch mode (verify / enroll)
-    // Gunakan fbdo.payload() untuk parse JSON mode
-  }
+    // Parse JSON dari payload response Firestore
+    FirebaseJson json;
+    FirebaseJsonData jsonData;
+    json.setJsonData(fbdo.payload());
 
-  int id = getFingerprintID();
-  if (id > 0) {
-    sendAttendance(id);
+    // Ambil nilai "mode"
+    String currentMode = "idle";
+    if (json.get(jsonData, "fields/mode/stringValue")) {
+      currentMode = jsonData.stringValue;
+    }
+
+    // Percabangan logika berdasarkan mode
+    if (currentMode == "verify") {
+      int id = getFingerprintID();
+      if (id > 0) {
+        sendAttendance(id);
+        delay(2000); // Jeda agar tidak terjadi pengiriman berulang/spam saat jari masih menempel
+      }
+    } 
+    else if (currentMode == "enroll") {
+      int targetId = 1;
+      // Ambil nilai target ID untuk didaftarkan
+      if (json.get(jsonData, "fields/enrollTargetId/integerValue")) {
+        targetId = jsonData.intValue;
+      }
+      enrollFingerprint(targetId);
+    }
+  } else {
+    Serial.println("Gagal mendapatkan config: " + fbdo.errorReason());
   }
-  delay(1000);
+  delay(1500); // Polling delay agar tidak melampaui batas kuota Firebase
 }
 
 void sendAttendance(int fingerprintId) {
@@ -109,6 +141,127 @@ int getFingerprintID() {
   p = finger.fingerFastSearch();
   if (p != FINGERPRINT_OK) return -1;
   return finger.fingerID;
+}
+
+void resetModeToVerify() {
+  FirebaseJson content;
+  content.set("fields/mode/stringValue", "verify");
+  
+  String path = "deviceConfigs/main-nodedcu";
+  
+  // Parameter updateMask = "mode" memastikan hanya nilai "mode" yang di-update
+  String updateMask = "mode"; 
+
+  Serial.print("Mengembalikan alat ke mode verify... ");
+  if (Firebase.Firestore.patchDocument(&fbdo, FIREBASE_PROJECT_ID, "", path.c_str(), content.raw(), updateMask.c_str())) {
+    Serial.println("Berhasil!");
+  } else {
+    Serial.println("Gagal: " + fbdo.errorReason());
+  }
+}
+
+void beepSuccess() {
+  digitalWrite(LED_PIN, LOW);  // Nyalakan LED
+  digitalWrite(BUZZER_PIN, HIGH); // Nyalakan Buzzer
+  delay(100);
+  digitalWrite(BUZZER_PIN, LOW);
+  delay(100);
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(100);
+  digitalWrite(BUZZER_PIN, LOW); // Matikan Buzzer
+  digitalWrite(LED_PIN, HIGH); // Matikan LED
+}
+
+void beepError() {
+  digitalWrite(BUZZER_PIN, HIGH); // Bunyi panjang
+  delay(800);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+bool enrollFingerprint(int id) {
+  Serial.print("Mode ENROLL aktif! Siap mendaftarkan ID: ");
+  Serial.println(id);
+  
+  int p = -1;
+  Serial.println("Silakan tempelkan jari Anda ke sensor...");
+  
+  // Langkah 1: Ambil gambar jari pertama
+  while (p != FINGERPRINT_OK) {
+    p = finger.getImage();
+    if (p == FINGERPRINT_NOFINGER) {
+      // Jari belum ditempel, tunggu
+      delay(100);
+    } else if (p == FINGERPRINT_OK) {
+      Serial.println("Gambar pertama berhasil diambil!");
+    } else {
+      Serial.println("Gagal membaca sidik jari.");
+      beepError();
+      return false;
+    }
+    yield(); // Mencegah Watchdog Timer (WDT) ESP8266 reset
+  }
+
+  // Langkah 2: Konversi gambar pertama
+  p = finger.image2Tz(1);
+  if (p != FINGERPRINT_OK) {
+    Serial.println("Gagal mengonversi gambar pertama.");
+    beepError();
+    return false;
+  }
+
+  // Langkah 3: Minta pengguna mengangkat jari
+  Serial.println("Angkat jari Anda...");
+  delay(2000);
+  p = 0;
+  while (p != FINGERPRINT_NOFINGER) {
+    p = finger.getImage();
+    yield();
+  }
+
+  // Langkah 4 & 5: Ambil gambar kedua dan konversi
+  p = -1;
+  Serial.println("Silakan tempelkan jari yang SAMA lagi...");
+  while (p != FINGERPRINT_OK) {
+    p = finger.getImage();
+    if (p == FINGERPRINT_NOFINGER) {
+      delay(100);
+    } else if (p == FINGERPRINT_OK) {
+      Serial.println("Gambar kedua berhasil diambil!");
+    }
+    yield();
+  }
+
+  p = finger.image2Tz(2);
+  if (p != FINGERPRINT_OK) {
+    Serial.println("Gagal mengonversi gambar kedua.");
+    beepError();
+    return false;
+  }
+
+  // Langkah 6: Buat model (cocokkan template 1 dan 2)
+  p = finger.createModel();
+  if (p != FINGERPRINT_OK) {
+    Serial.println("Sidik jari tidak cocok. Pendaftaran gagal!");
+    beepError();
+    return false;
+  }
+
+  // Langkah 7: Simpan ke memori sensor
+  p = finger.storeModel(id);
+  if (p != FINGERPRINT_OK) {
+    Serial.println("Gagal menyimpan ke sensor!");
+    beepError();
+    return false;
+  }
+  
+  Serial.println("Pendaftaran sidik jari SUKSES!");
+  beepSuccess();
+  
+  // Setelah proses enroll selesai dan sukses tersimpan di memori sensor,
+  // ubah status di Firestore kembali menjadi 'verify' secara otomatis.
+  resetModeToVerify();
+
+  return true;
 }
 ```
 
