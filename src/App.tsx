@@ -26,8 +26,9 @@ import {
   Clock, 
   ShieldCheck, 
   Settings,
-  Circle,
-  Activity
+  Activity,
+  FileText,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -57,7 +58,7 @@ interface DeviceConfig {
 // --- Main App Component ---
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'attendance' | 'employees' | 'device'>('attendance');
+  const [activeTab, setActiveTab] = useState<'attendance' | 'employees' | 'device' | 'reports'>('attendance');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -111,6 +112,12 @@ export default function App() {
               icon={<Settings size={20} />}
               label="Perangkat" 
             />
+            <NavButton 
+              active={activeTab === 'reports'} 
+              onClick={() => setActiveTab('reports')}
+              icon={<FileText size={20} />}
+              label="Laporan" 
+            />
           </div>
         </div>
 
@@ -132,7 +139,7 @@ export default function App() {
             <div>
               <p className="text-[10px] uppercase tracking-[0.2em] font-mono text-slate-500 mb-1">DASHBOARD</p>
               <h2 className="text-4xl font-bold text-slate-100">
-                {activeTab === 'attendance' ? 'Log Kehadiran' : activeTab === 'employees' ? 'Daftar Karyawan' : 'Konfigurasi Alat'}
+                {activeTab === 'attendance' ? 'Log Kehadiran' : activeTab === 'employees' ? 'Daftar Karyawan' : activeTab === 'device' ? 'Konfigurasi Alat' : 'Laporan Bulanan'}
               </h2>
             </div>
             <div className="hidden md:flex items-center gap-4 text-right">
@@ -153,6 +160,7 @@ export default function App() {
           {activeTab === 'attendance' && <AttendanceView key="att" />}
           {activeTab === 'employees' && <EmployeeView key="emp" />}
           {activeTab === 'device' && <DeviceView key="dev" />}
+          {activeTab === 'reports' && <ReportView key="rep" />}
         </AnimatePresence>
       </main>
     </div>
@@ -201,6 +209,130 @@ function NavButton({ active, onClick, icon, label }: { active: boolean, onClick:
       {icon}
       <span className="font-semibold text-sm tracking-wide">{label}</span>
     </button>
+  );
+}
+
+function ReportView() {
+  const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const [reportData, setReportData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchReport = async () => {
+      setLoading(true);
+      try {
+        // 1. Ambil data semua karyawan
+        const empSnap = await getDocs(collection(db, 'employees'));
+        const employees = empSnap.docs.map(d => ({ id: d.id, ...d.data() } as Employee));
+        
+        // 2. Tentukan batas tanggal awal dan akhir bulan yang dipilih
+        const [yearStr, monthStr] = month.split('-');
+        const startDate = new Date(parseInt(yearStr), parseInt(monthStr) - 1, 1);
+        const endDate = new Date(parseInt(yearStr), parseInt(monthStr), 1); // Tanggal 1 bulan depannya
+
+        // 3. Ambil data presensi dalam rentang waktu tersebut
+        const q = query(
+          collection(db, 'attendance'),
+          where('timestamp', '>=', startDate),
+          where('timestamp', '<', endDate)
+        );
+        
+        const attSnap = await getDocs(q);
+        const attendanceLogs = attSnap.docs.map(d => d.data() as Attendance);
+
+        // 4. Kelompokkan data presensi ke masing-masing karyawan
+        const stats = employees.map(emp => {
+          const empLogs = attendanceLogs.filter(log => log.employeeId === emp.fingerprintId.toString() || log.employeeId === emp.id);
+          
+          // Hitung hari unik (agar absen berkali-kali di hari yang sama tetap dihitung 1 hari)
+          const uniqueDays = new Set(
+            empLogs
+              .filter(log => log.timestamp)
+              .map(log => format(log.timestamp.toDate(), 'yyyy-MM-dd'))
+          );
+
+          return {
+            ...emp,
+            presentDays: uniqueDays.size,
+            totalLogs: empLogs.length
+          };
+        });
+        
+        setReportData(stats);
+      } catch (err) {
+        console.error("Gagal memuat laporan", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchReport();
+  }, [month]);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className="space-y-6"
+    >
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900/50 p-4 rounded-2xl border border-slate-800 gap-4 print:hidden">
+        <div className="flex items-center gap-4">
+          <div className="text-xs font-mono text-slate-500 pl-2">PILIH BULAN</div>
+          <input 
+            type="month" 
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="bg-slate-900 border border-slate-700 rounded-xl p-2 focus:border-cyan-500 outline-none text-sm font-mono text-cyan-400"
+          />
+        </div>
+        <button 
+          onClick={() => window.print()}
+          className="flex items-center gap-2 bg-cyan-600 text-white px-6 py-2.5 rounded-xl hover:bg-cyan-500 transition-all font-bold text-sm shadow-lg shadow-cyan-900/20"
+        >
+          <Download size={18} />
+          CETAK LAPORAN
+        </button>
+      </div>
+
+      <div className="bento-card overflow-hidden overflow-x-auto print:bg-white print:text-black print:p-0 print:border-none print:shadow-none">
+        <h2 className="hidden print:block text-2xl font-bold mb-6 text-center">Rekap Kehadiran - Bulan {format(new Date(`${month}-01`), 'MMMM yyyy')}</h2>
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b border-slate-700/50 print:border-black/50">
+              <th className="p-4 text-xs font-mono tracking-widest text-slate-500 print:text-black uppercase">ID FP</th>
+              <th className="p-4 text-xs font-mono tracking-widest text-slate-500 print:text-black uppercase">Nama Karyawan</th>
+              <th className="p-4 text-xs font-mono tracking-widest text-slate-500 print:text-black uppercase">Jabatan/Departemen</th>
+              <th className="p-4 text-xs font-mono tracking-widest text-slate-500 print:text-black uppercase">Total Kehadiran</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-700/50 print:divide-black/20">
+            {loading ? (
+              <tr>
+                <td colSpan={4} className="p-8 text-center text-slate-500 font-mono text-sm">Sedang merekap data...</td>
+              </tr>
+            ) : reportData.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="p-8 text-center text-slate-500">Tidak ada data karyawan untuk ditampilkan.</td>
+              </tr>
+            ) : (
+              reportData.map(row => (
+                <tr key={row.id} className="hover:bg-slate-800/30 transition-colors">
+                  <td className="p-4 font-mono text-sm text-cyan-400 print:text-black">#{row.fingerprintId.toString().padStart(3, '0')}</td>
+                  <td className="p-4 font-bold text-slate-100 print:text-black">{row.name}</td>
+                  <td className="p-4 text-sm text-slate-400 print:text-black uppercase">{row.position}</td>
+                  <td className="p-4">
+                    <span className="bg-emerald-500/10 text-emerald-400 print:bg-transparent print:text-black border border-emerald-500/20 print:border-none px-3 py-1 rounded-full text-xs font-bold">
+                      {row.presentDays} Hari
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </motion.div>
   );
 }
 
