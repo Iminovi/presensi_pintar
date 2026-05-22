@@ -8,6 +8,7 @@ import {
   serverTimestamp,
   doc,
   setDoc,
+  getDoc,
   getDocs,
   where,
   limit
@@ -58,12 +59,41 @@ interface DeviceConfig {
 // --- Main App Component ---
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [isApproved, setIsApproved] = useState<boolean | null>(null);
   const [activeTab, setActiveTab] = useState<'attendance' | 'employees' | 'device' | 'reports'>('attendance');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      if (u && u.email) {
+        try {
+          const docRef = doc(db, 'admins', u.email);
+          const docSnap = await getDoc(docRef);
+          
+          if (docSnap.exists() && docSnap.data().approved === true) {
+            setUser(u);
+            setIsApproved(true);
+          } else {
+            // Catat akun baru sebagai pending (belum di-approve)
+            await setDoc(docRef, {
+              name: u.displayName,
+              email: u.email,
+              approved: docSnap.exists() ? docSnap.data().approved : false,
+              lastLogin: serverTimestamp()
+            }, { merge: true });
+            
+            setUser(u);
+            setIsApproved(false);
+          }
+        } catch (error) {
+          console.error("Gagal memverifikasi status admin", error);
+          setUser(u);
+          setIsApproved(false);
+        }
+      } else {
+        setUser(null);
+        setIsApproved(null);
+      }
       setLoading(false);
     });
     return unsubscribe;
@@ -79,6 +109,10 @@ export default function App() {
 
   if (!user) {
     return <LoginScreen />;
+  }
+
+  if (user && !isApproved) {
+    return <PendingApprovalScreen user={user} />;
   }
 
   return (
@@ -168,6 +202,34 @@ export default function App() {
 }
 
 // --- Sub-components ---
+
+function PendingApprovalScreen({ user }: { user: User }) {
+  return (
+    <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center p-6 relative overflow-hidden text-center">
+      <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#22d3ee 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bento-card max-w-md w-full relative z-10"
+      >
+        <div className="bg-amber-500/10 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-amber-500/20 text-amber-500">
+          <ShieldCheck size={32} />
+        </div>
+        <h1 className="text-2xl font-bold mb-2 text-slate-100">Menunggu Persetujuan</h1>
+        <p className="text-slate-400 mb-6 text-sm">
+          Akun <strong className="text-slate-200">{user.email}</strong> belum memiliki akses ke dashboard ini. Silakan hubungi Administrator Utama untuk meminta persetujuan akses.
+        </p>
+        <button 
+          onClick={logOut}
+          className="w-full flex items-center justify-center gap-3 bg-slate-800 text-slate-300 p-4 rounded-xl hover:bg-slate-700 transition-all font-bold"
+        >
+          <LogOut size={18} />
+          Keluar Akun
+        </button>
+      </motion.div>
+    </div>
+  );
+}
 
 function LoginScreen() {
   return (
