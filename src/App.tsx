@@ -27,7 +27,8 @@ import {
   ShieldCheck, 
   Settings,
   Circle,
-  Activity
+  Activity,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -330,6 +331,49 @@ function AttendanceView() {
     return unsubscribe;
   }, []);
 
+  const handleExportCSV = () => {
+    if (logs.length === 0) return;
+
+    // Prepare CSV rows and format them
+    const headers = ['ID Log', 'ID Karyawan', 'Nama Karyawan', 'Tanggal', 'Jam', 'Tipe Presensi', 'Status'];
+    const rows = logs.map(log => {
+      const dateObj = log.timestamp?.toDate ? log.timestamp.toDate() : null;
+      const dateStr = dateObj ? format(dateObj, 'yyyy-MM-dd') : '-----';
+      const timeStr = dateObj ? format(dateObj, 'HH:mm:ss') : '--:--:--';
+      const typeStr = log.type === 'in' ? 'Check In' : 'Check Out';
+      
+      // Escape names and handle possible commas
+      const escapedName = log.employeeName ? `"${log.employeeName.replace(/"/g, '""')}"` : '""';
+      
+      return [
+        log.id || '',
+        log.employeeId || '',
+        escapedName,
+        dateStr,
+        timeStr,
+        typeStr,
+        'Terverifikasi'
+      ];
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+
+    // Generate blob and trigger file download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    const fileName = `Laporan_Kehadiran_${format(new Date(), 'yyyy-MM-dd_HHmmss')}.csv`;
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, scale: 0.95 }}
@@ -337,10 +381,27 @@ function AttendanceView() {
       exit={{ opacity: 0, scale: 0.95 }}
       className="bento-card overflow-hidden"
     >
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Recent Presence Logs</h2>
-        <div className="flex gap-1">
-          {[1, 2, 3, 4].map(i => <div key={i} className={`h-1.5 w-6 rounded-full ${i < 4 ? 'bg-cyan-500' : 'bg-slate-700'}`}></div>)}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div>
+          <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Recent Presence Logs</h2>
+          <p className="text-[10px] text-slate-500 font-mono mt-1">Total: {logs.length} Log Kehadiran</p>
+        </div>
+        <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-start">
+          <button
+            onClick={handleExportCSV}
+            disabled={logs.length === 0}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider font-mono transition-all border shrink-0 ${
+              logs.length === 0
+                ? 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
+                : 'bg-cyan-600/10 hover:bg-cyan-600/20 border-cyan-500/30 text-cyan-400 hover:text-white cursor-pointer active:scale-95'
+            }`}
+          >
+            <Download size={14} />
+            Export to CSV
+          </button>
+          <div className="flex gap-1 shrink-0">
+            {[1, 2, 3, 4].map(i => <div key={i} className={`h-1.5 w-6 rounded-full ${i < 4 ? 'bg-cyan-500' : 'bg-slate-700'}`}></div>)}
+          </div>
         </div>
       </div>
       
