@@ -70,6 +70,8 @@ export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState<'attendance' | 'employees' | 'device' | 'users'>('attendance');
   const [loading, setLoading] = useState(true);
+  const [deviceConfig, setDeviceConfig] = useState<DeviceConfig | null>(null);
+  const [isDeviceConnected, setIsDeviceConnected] = useState<boolean>(false);
 
   useEffect(() => {
     let unsubDoc: (() => void) | null = null;
@@ -124,6 +126,61 @@ export default function App() {
       if (unsubDoc) unsubDoc();
     };
   }, []);
+
+  // Monitor device configs and last active time
+  useEffect(() => {
+    if (!user) {
+      setDeviceConfig(null);
+      setIsDeviceConnected(false);
+      return;
+    }
+
+    const docRef = doc(db, 'deviceConfigs', 'main-nodedcu');
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setDeviceConfig(docSnap.data() as DeviceConfig);
+      } else {
+        // Initialize if not exists
+        setDoc(docRef, { mode: 'verify', enrollTargetId: 1, message: 'Ready' });
+      }
+    }, (error) => {
+      console.error("Device config listen error:", error);
+    });
+
+    return unsubscribe;
+  }, [user]);
+
+  // Handle dynamic connected / disconnected calculation
+  useEffect(() => {
+    const checkConnection = () => {
+      if (!deviceConfig || !deviceConfig.lastActive) {
+        setIsDeviceConnected(false);
+        return;
+      }
+      
+      let lastActiveMs = 0;
+      if (deviceConfig.lastActive?.toDate) {
+        lastActiveMs = deviceConfig.lastActive.toDate().getTime();
+      } else if (deviceConfig.lastActive?.seconds) {
+        lastActiveMs = deviceConfig.lastActive.seconds * 1000;
+      } else if (typeof deviceConfig.lastActive === 'number') {
+        lastActiveMs = deviceConfig.lastActive;
+      } else if (typeof deviceConfig.lastActive === 'string') {
+        lastActiveMs = new Date(deviceConfig.lastActive).getTime();
+      } else {
+        setIsDeviceConnected(false);
+        return;
+      }
+
+      const now = new Date().getTime();
+      // If last active was within the last 60 seconds, we count it as CONNECTED
+      setIsDeviceConnected(now - lastActiveMs < 60000);
+    };
+
+    checkConnection();
+    const interval = setInterval(checkConnection, 5000);
+    return () => clearInterval(interval);
+  }, [deviceConfig]);
 
   if (loading || (user && !profile)) {
     return (
@@ -253,10 +310,17 @@ export default function App() {
                 <div className="text-[10px] text-slate-500 uppercase tracking-widest">{format(new Date(), 'EEEE, MMM dd')}</div>
               </div>
               <div className="h-8 w-[1px] bg-slate-700"></div>
-              <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 text-[10px] font-bold">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
-                NODEMCU CONNECTED
-              </div>
+              {isDeviceConnected ? (
+                <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 text-[10px] font-bold">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
+                  NODEMCU CONNECTED
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 bg-red-500/10 text-red-500 px-3 py-1 rounded-full border border-red-500/20 text-[10px] font-bold">
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                  NODEMCU DISCONNECTED
+                </div>
+              )}
             </div>
           </div>
         </header>
@@ -264,7 +328,7 @@ export default function App() {
         <AnimatePresence mode="wait">
           {activeTab === 'attendance' && <AttendanceView key="att" />}
           {activeTab === 'employees' && <EmployeeView key="emp" />}
-          {activeTab === 'device' && <DeviceView key="dev" />}
+          {activeTab === 'device' && <DeviceView key="dev" config={deviceConfig} isConnected={isDeviceConnected} />}
           {activeTab === 'users' && <UsersApprovalView key="usr" />}
         </AnimatePresence>
       </main>
@@ -565,22 +629,7 @@ function EmployeeView() {
   );
 }
 
-function DeviceView() {
-  const [config, setConfig] = useState<DeviceConfig | null>(null);
-
-  useEffect(() => {
-    const docRef = doc(db, 'deviceConfigs', 'main-nodedcu');
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setConfig(docSnap.data() as DeviceConfig);
-      } else {
-        // Initialize if not exists
-        setDoc(docRef, { mode: 'verify', enrollTargetId: 1, message: 'Ready' });
-      }
-    });
-    return unsubscribe;
-  }, []);
-
+function DeviceView({ config, isConnected }: { config: DeviceConfig | null, isConnected: boolean, key?: any }) {
   const updateMode = async (mode: 'verify' | 'enroll' | 'idle', targetId?: number) => {
     try {
       await setDoc(doc(db, 'deviceConfigs', 'main-nodedcu'), { 
@@ -604,14 +653,18 @@ function DeviceView() {
         <div>
           <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Live Hardware Status</h2>
           <div className="flex items-center gap-2 mb-8">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-mono text-emerald-400 uppercase tracking-widest">ESP8266 Live Connection</span>
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'}`} />
+            <span className={`text-xs font-mono uppercase tracking-widest ${isConnected ? 'text-emerald-400' : 'text-red-500'}`}>
+              ESP8266 {isConnected ? 'CONNECTED' : 'DISCONNECTED'}
+            </span>
           </div>
 
           <div className="bg-slate-900/50 rounded-2xl p-8 border border-slate-700/30 flex flex-col items-center justify-center relative overflow-hidden mb-6">
             <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#22d3ee 1px, transparent 0)', backgroundSize: '15px 15px' }}></div>
-            <Fingerprint className="w-20 h-20 text-cyan-500/40 mb-4" strokeWidth={1} />
-            <div className="text-[10px] text-cyan-400 font-mono animate-pulse tracking-widest uppercase">Scanner Active</div>
+            <Fingerprint className={`w-20 h-20 mb-4 transition-all ${isConnected ? 'text-cyan-500/40 animate-pulse' : 'text-slate-700/30'}`} strokeWidth={1} />
+            <div className={`text-[10px] font-mono tracking-widest uppercase ${isConnected ? 'text-cyan-400 animate-pulse' : 'text-slate-500'}`}>
+              {isConnected ? 'Scanner Active' : 'Scanner Offline'}
+            </div>
           </div>
         </div>
 
