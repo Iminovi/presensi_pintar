@@ -67,5 +67,11 @@ service cloud.firestore {
       allow read: if true; // Device needs to read its config without auth (unless we use secret tokens, but for DIY we keep it simple)
       allow write: if isSignedIn() && isValidDeviceConfig(incoming());
     }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
   }
 }

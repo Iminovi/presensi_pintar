@@ -72,6 +72,32 @@
           "description": "Status message to display on device (if it has an LCD)"
         }
       }
+    },
+    "User": {
+      "title": "User",
+      "description": "Approved and pending user configurations for accessing the dashboard.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "user"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "name", "status", "role"]
     }
   },
   "firestore": {
@@ -86,6 +112,10 @@
     "deviceConfigs": {
       "schema": "DeviceConfig",
       "description": "Device-specific settings (usually just one document)"
+    },
+    "users": {
+      "schema": "User",
+      "description": "User accounts with access status (pending, approved, or rejected)"
     }
   }
 }

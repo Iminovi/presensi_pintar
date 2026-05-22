@@ -8,7 +8,6 @@ import {
   serverTimestamp,
   doc,
   setDoc,
-  getDoc,
   getDocs,
   where,
   limit
@@ -27,9 +26,8 @@ import {
   Clock, 
   ShieldCheck, 
   Settings,
-  Activity,
-  FileText,
-  Download
+  Circle,
+  Activity
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -56,50 +54,77 @@ interface DeviceConfig {
   lastActive?: any;
 }
 
+interface UserProfile {
+  uid: string;
+  name: string;
+  email: string;
+  status: 'pending' | 'approved' | 'rejected';
+  role: 'admin' | 'user';
+  createdAt?: any;
+}
+
 // --- Main App Component ---
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [isApproved, setIsApproved] = useState<boolean | null>(null);
-  const [activeTab, setActiveTab] = useState<'attendance' | 'employees' | 'device' | 'reports'>('attendance');
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [activeTab, setActiveTab] = useState<'attendance' | 'employees' | 'device' | 'users'>('attendance');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsubDoc: (() => void) | null = null;
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (u && u.email) {
-        try {
-          const docRef = doc(db, 'admins', u.email);
-          const docSnap = await getDoc(docRef);
-          
-          if (docSnap.exists() && docSnap.data().approved === true) {
-            setUser(u);
-            setIsApproved(true);
-          } else {
-            // Catat akun baru sebagai pending (belum di-approve)
-            await setDoc(docRef, {
-              name: u.displayName,
-              email: u.email,
-              approved: docSnap.exists() ? docSnap.data().approved : false,
-              lastLogin: serverTimestamp()
-            }, { merge: true });
-            
-            setUser(u);
-            setIsApproved(false);
-          }
-        } catch (error) {
-          console.error("Gagal memverifikasi status admin", error);
-          setUser(u);
-          setIsApproved(false);
-        }
-      } else {
-        setUser(null);
-        setIsApproved(null);
+      if (unsubDoc) {
+        unsubDoc();
+        unsubDoc = null;
       }
-      setLoading(false);
+      
+      setUser(u);
+      if (u) {
+        const docRef = doc(db, 'users', u.uid);
+        unsubDoc = onSnapshot(docRef, async (docSnap) => {
+          if (docSnap.exists()) {
+            setProfile({ uid: u.uid, ...docSnap.data() } as UserProfile);
+            setLoading(false);
+          } else {
+            try {
+              const usersQuery = query(collection(db, 'users'), where('role', '==', 'admin'), limit(1));
+              const usersSnap = await getDocs(usersQuery);
+              const isEmpty = usersSnap.empty;
+              
+              const isOwner = u.email === 'yminato617@gmail.com';
+              const shouldBeAdmin = isEmpty || isOwner;
+              
+              const newProfile = {
+                email: u.email || '',
+                name: u.displayName || 'Akun Google',
+                status: shouldBeAdmin ? 'approved' : 'pending',
+                role: shouldBeAdmin ? 'admin' : 'user',
+                createdAt: serverTimestamp()
+              };
+              
+              await setDoc(docRef, newProfile);
+            } catch (error) {
+              console.error('Error auto-creating profile:', error);
+              setLoading(false);
+            }
+          }
+        }, (error) => {
+          console.error("Profile listen error:", error);
+          setLoading(false);
+        });
+      } else {
+        setProfile(null);
+        setLoading(false);
+      }
     });
-    return unsubscribe;
+
+    return () => {
+      unsubscribe();
+      if (unsubDoc) unsubDoc();
+    };
   }, []);
 
-  if (loading) {
+  if (loading || (user && !profile)) {
     return (
       <div className="min-h-screen bg-[#0f172a] flex items-center justify-center">
         <Activity className="animate-spin text-cyan-500" />
@@ -111,14 +136,57 @@ export default function App() {
     return <LoginScreen />;
   }
 
-  if (user && !isApproved) {
-    return <PendingApprovalScreen user={user} />;
+  if (profile && (profile.status === 'pending' || profile.status === 'rejected')) {
+    return (
+      <div className="min-h-screen bg-[#0f172a] flex items-center justify-center p-6 relative overflow-hidden text-slate-100">
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#22d3ee 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bento-card max-w-md w-full text-center relative z-10 border-cyan-500/10"
+        >
+          {profile.status === 'pending' ? (
+            <>
+              <div className="bg-amber-500/25 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-amber-500/40">
+                <Clock className="text-amber-400 w-8 h-8 font-bold" />
+              </div>
+              <h1 className="text-2xl font-bold mb-2 text-slate-100">Menunggu Persetujuan</h1>
+              <p className="text-slate-400 text-sm leading-relaxed mb-6">
+                Halo, <span className="text-cyan-400 font-bold">{profile.name}</span>. Akun Anda telah didaftarkan dan saat ini sedang menunggu persetujuan (approval) dari Administrator sistem.
+              </p>
+              <div className="bg-slate-900/50 p-4 rounded-xl text-left border border-slate-700/30 text-xs font-mono space-y-2 mb-8">
+                <div className="flex justify-between"><span className="text-slate-500">EMAIL:</span> <span>{profile.email}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">STATUS:</span> <span className="text-amber-400 font-bold">PENDING APPROVAL</span></div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="bg-red-500/25 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-red-500/40">
+                <ShieldCheck className="text-red-400 w-8 h-8" />
+              </div>
+              <h1 className="text-2xl font-bold mb-2 text-slate-100">Akses Ditolak</h1>
+              <p className="text-slate-400 text-sm leading-relaxed mb-6">
+                Maaf, akses Anda ke sistem dinonaktifkan atau ditolak oleh Administrator. Hubungi admin untuk memulihkan akses Anda.
+              </p>
+            </>
+          )}
+          
+          <button 
+            onClick={logOut}
+            className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white p-3 rounded-xl transition-all font-semibold border border-slate-700"
+          >
+            <LogOut size={16} />
+            Keluar / Ganti Akun
+          </button>
+        </motion.div>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-[#0f172a] text-slate-100 flex flex-col md:flex-row print:bg-white print:text-black">
+    <div className="min-h-screen bg-[#0f172a] text-slate-100 flex flex-col md:flex-row">
       {/* Sidebar */}
-      <nav className="w-full md:w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between print:hidden">
+      <nav className="w-full md:w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between">
         <div>
           <div className="flex items-center gap-3 mb-10">
             <div className="bg-cyan-500 p-2 rounded-xl">
@@ -146,12 +214,14 @@ export default function App() {
               icon={<Settings size={20} />}
               label="Perangkat" 
             />
-            <NavButton 
-              active={activeTab === 'reports'} 
-              onClick={() => setActiveTab('reports')}
-              icon={<FileText size={20} />}
-              label="Laporan" 
-            />
+            {profile && profile.role === 'admin' && (
+              <NavButton 
+                active={activeTab === 'users'} 
+                onClick={() => setActiveTab('users')}
+                icon={<Users size={20} />}
+                label="Persetujuan" 
+              />
+            )}
           </div>
         </div>
 
@@ -167,13 +237,13 @@ export default function App() {
       </nav>
 
       {/* Main Content */}
-      <main className="flex-1 p-6 md:p-12 overflow-y-auto print:p-0 print:overflow-visible">
-        <header className="mb-10 print:hidden">
+      <main className="flex-1 p-6 md:p-12 overflow-y-auto">
+        <header className="mb-10">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-[10px] uppercase tracking-[0.2em] font-mono text-slate-500 mb-1">DASHBOARD</p>
               <h2 className="text-4xl font-bold text-slate-100">
-                {activeTab === 'attendance' ? 'Log Kehadiran' : activeTab === 'employees' ? 'Daftar Karyawan' : activeTab === 'device' ? 'Konfigurasi Alat' : 'Laporan Bulanan'}
+                {activeTab === 'attendance' ? 'Log Kehadiran' : activeTab === 'employees' ? 'Daftar Karyawan' : activeTab === 'device' ? 'Konfigurasi Alat' : 'Persetujuan Akun'}
               </h2>
             </div>
             <div className="hidden md:flex items-center gap-4 text-right">
@@ -194,7 +264,7 @@ export default function App() {
           {activeTab === 'attendance' && <AttendanceView key="att" />}
           {activeTab === 'employees' && <EmployeeView key="emp" />}
           {activeTab === 'device' && <DeviceView key="dev" />}
-          {activeTab === 'reports' && <ReportView key="rep" />}
+          {activeTab === 'users' && <UsersApprovalView key="usr" />}
         </AnimatePresence>
       </main>
     </div>
@@ -202,34 +272,6 @@ export default function App() {
 }
 
 // --- Sub-components ---
-
-function PendingApprovalScreen({ user }: { user: User }) {
-  return (
-    <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center p-6 relative overflow-hidden text-center">
-      <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#22d3ee 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bento-card max-w-md w-full relative z-10"
-      >
-        <div className="bg-amber-500/10 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-amber-500/20 text-amber-500">
-          <ShieldCheck size={32} />
-        </div>
-        <h1 className="text-2xl font-bold mb-2 text-slate-100">Menunggu Persetujuan</h1>
-        <p className="text-slate-400 mb-6 text-sm">
-          Akun <strong className="text-slate-200">{user.email}</strong> belum memiliki akses ke dashboard ini. Silakan hubungi Administrator Utama untuk meminta persetujuan akses.
-        </p>
-        <button 
-          onClick={logOut}
-          className="w-full flex items-center justify-center gap-3 bg-slate-800 text-slate-300 p-4 rounded-xl hover:bg-slate-700 transition-all font-bold"
-        >
-          <LogOut size={18} />
-          Keluar Akun
-        </button>
-      </motion.div>
-    </div>
-  );
-}
 
 function LoginScreen() {
   return (
@@ -271,130 +313,6 @@ function NavButton({ active, onClick, icon, label }: { active: boolean, onClick:
       {icon}
       <span className="font-semibold text-sm tracking-wide">{label}</span>
     </button>
-  );
-}
-
-function ReportView() {
-  const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
-  const [reportData, setReportData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const fetchReport = async () => {
-      setLoading(true);
-      try {
-        // 1. Ambil data semua karyawan
-        const empSnap = await getDocs(collection(db, 'employees'));
-        const employees = empSnap.docs.map(d => ({ id: d.id, ...d.data() } as Employee));
-        
-        // 2. Tentukan batas tanggal awal dan akhir bulan yang dipilih
-        const [yearStr, monthStr] = month.split('-');
-        const startDate = new Date(parseInt(yearStr), parseInt(monthStr) - 1, 1);
-        const endDate = new Date(parseInt(yearStr), parseInt(monthStr), 1); // Tanggal 1 bulan depannya
-
-        // 3. Ambil data presensi dalam rentang waktu tersebut
-        const q = query(
-          collection(db, 'attendance'),
-          where('timestamp', '>=', startDate),
-          where('timestamp', '<', endDate)
-        );
-        
-        const attSnap = await getDocs(q);
-        const attendanceLogs = attSnap.docs.map(d => d.data() as Attendance);
-
-        // 4. Kelompokkan data presensi ke masing-masing karyawan
-        const stats = employees.map(emp => {
-          const empLogs = attendanceLogs.filter(log => log.employeeId === emp.fingerprintId.toString() || log.employeeId === emp.id);
-          
-          // Hitung hari unik (agar absen berkali-kali di hari yang sama tetap dihitung 1 hari)
-          const uniqueDays = new Set(
-            empLogs
-              .filter(log => log.timestamp)
-              .map(log => format(log.timestamp.toDate(), 'yyyy-MM-dd'))
-          );
-
-          return {
-            ...emp,
-            presentDays: uniqueDays.size,
-            totalLogs: empLogs.length
-          };
-        });
-        
-        setReportData(stats);
-      } catch (err) {
-        console.error("Gagal memuat laporan", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchReport();
-  }, [month]);
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      className="space-y-6"
-    >
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900/50 p-4 rounded-2xl border border-slate-800 gap-4 print:hidden">
-        <div className="flex items-center gap-4">
-          <div className="text-xs font-mono text-slate-500 pl-2">PILIH BULAN</div>
-          <input 
-            type="month" 
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="bg-slate-900 border border-slate-700 rounded-xl p-2 focus:border-cyan-500 outline-none text-sm font-mono text-cyan-400"
-          />
-        </div>
-        <button 
-          onClick={() => window.print()}
-          className="flex items-center gap-2 bg-cyan-600 text-white px-6 py-2.5 rounded-xl hover:bg-cyan-500 transition-all font-bold text-sm shadow-lg shadow-cyan-900/20"
-        >
-          <Download size={18} />
-          CETAK LAPORAN
-        </button>
-      </div>
-
-      <div className="bento-card overflow-hidden overflow-x-auto print:bg-white print:text-black print:p-0 print:border-none print:shadow-none">
-        <h2 className="hidden print:block text-2xl font-bold mb-6 text-center">Rekap Kehadiran - Bulan {format(new Date(`${month}-01`), 'MMMM yyyy')}</h2>
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="border-b border-slate-700/50 print:border-black/50">
-              <th className="p-4 text-xs font-mono tracking-widest text-slate-500 print:text-black uppercase">ID FP</th>
-              <th className="p-4 text-xs font-mono tracking-widest text-slate-500 print:text-black uppercase">Nama Karyawan</th>
-              <th className="p-4 text-xs font-mono tracking-widest text-slate-500 print:text-black uppercase">Jabatan/Departemen</th>
-              <th className="p-4 text-xs font-mono tracking-widest text-slate-500 print:text-black uppercase">Total Kehadiran</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-700/50 print:divide-black/20">
-            {loading ? (
-              <tr>
-                <td colSpan={4} className="p-8 text-center text-slate-500 font-mono text-sm">Sedang merekap data...</td>
-              </tr>
-            ) : reportData.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="p-8 text-center text-slate-500">Tidak ada data karyawan untuk ditampilkan.</td>
-              </tr>
-            ) : (
-              reportData.map(row => (
-                <tr key={row.id} className="hover:bg-slate-800/30 transition-colors">
-                  <td className="p-4 font-mono text-sm text-cyan-400 print:text-black">#{row.fingerprintId.toString().padStart(3, '0')}</td>
-                  <td className="p-4 font-bold text-slate-100 print:text-black">{row.name}</td>
-                  <td className="p-4 text-sm text-slate-400 print:text-black uppercase">{row.position}</td>
-                  <td className="p-4">
-                    <span className="bg-emerald-500/10 text-emerald-400 print:bg-transparent print:text-black border border-emerald-500/20 print:border-none px-3 py-1 rounded-full text-xs font-bold">
-                      {row.presentDays} Hari
-                    </span>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </motion.div>
   );
 }
 
@@ -742,5 +660,155 @@ function ModeButton({ active, onClick, label }: { active: boolean, onClick: () =
     >
       {label}
     </button>
+  );
+}
+
+function UsersApprovalView() {
+  const [userList, setUserList] = useState<UserProfile[]>([]);
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+
+  useEffect(() => {
+    const q = query(collection(db, 'users'), orderBy('email', 'asc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const u = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
+      setUserList(u);
+    });
+    return unsubscribe;
+  }, []);
+
+  const handleUpdateStatus = async (uid: string, newStatus: 'approved' | 'pending' | 'rejected') => {
+    if (uid === auth.currentUser?.uid) {
+      alert("Anda tidak bisa mengubah status akun Anda sendiri!");
+      return;
+    }
+    try {
+      await setDoc(doc(db, 'users', uid), { status: newStatus }, { merge: true });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${uid}`);
+    }
+  };
+
+  const handleToggleRole = async (uid: string, currentRole: 'admin' | 'user') => {
+    if (uid === auth.currentUser?.uid) {
+      alert("Anda tidak bisa mengubah peran Anda sendiri!");
+      return;
+    }
+    const newRole = currentRole === 'admin' ? 'user' : 'admin';
+    try {
+      await setDoc(doc(db, 'users', uid), { role: newRole }, { merge: true });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${uid}`);
+    }
+  };
+
+  const filteredUsers = userList.filter(u => {
+    if (filter === 'all') return true;
+    return u.status === filter;
+  });
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className="space-y-6"
+    >
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+        <div className="text-xs font-mono text-slate-500 pl-2">FILTER STATUS AKUN</div>
+        <div className="flex gap-2">
+          {(['all', 'pending', 'approved', 'rejected'] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-4 py-2 rounded-xl text-xs font-mono uppercase font-bold tracking-wider transition-all ${
+                filter === f
+                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/40'
+                  : 'bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-100'
+              }`}
+            >
+              {f === 'all' ? 'Semua' : f === 'pending' ? 'Pending' : f === 'approved' ? 'Disetujui' : 'Ditolak'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredUsers.length === 0 ? (
+          <div className="col-span-full bento-card text-center p-12 text-slate-500 italic">
+            Tidak ada akun dengan status ini.
+          </div>
+        ) : filteredUsers.map(u => {
+          const isSelf = u.uid === auth.currentUser?.uid;
+          return (
+            <div key={u.uid} className={`bento-card relative overflow-hidden group transition-all ${isSelf ? 'border-cyan-500/40 bg-slate-800/90' : ''}`}>
+              <div className="flex justify-between items-start mb-6">
+                <div className={`p-3 rounded-2xl ${u.role === 'admin' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-slate-700/50 text-slate-400'}`}>
+                  <Users size={24} />
+                </div>
+                <div className="text-right">
+                  <span className={`inline-block text-[9px] font-bold tracking-widest font-mono uppercase px-2.5 py-1 rounded-full ${
+                    u.status === 'approved' 
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                      : u.status === 'pending'
+                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
+                      : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                  }`}>
+                    {u.status}
+                  </span>
+                </div>
+              </div>
+
+              <h3 className="text-lg font-bold mb-1 truncate flex items-center gap-2">
+                {u.name} 
+                {isSelf && <span className="text-[9px] bg-cyan-400 text-slate-900 px-1.5 py-0.5 rounded font-mono font-bold">YOU</span>}
+              </h3>
+              <p className="text-xs font-mono text-slate-500 mb-6 truncate">{u.email}</p>
+
+              <div className="pt-4 border-t border-slate-700/50 flex flex-col gap-3">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500 font-mono">PERAN / ROLE:</span>
+                  <button 
+                    disabled={isSelf}
+                    onClick={() => handleToggleRole(u.uid, u.role || 'user')}
+                    className={`font-mono text-xs font-bold uppercase transition-all px-2 py-1 rounded ${
+                      u.role === 'admin' 
+                        ? 'text-cyan-400 hover:bg-cyan-500/10' 
+                        : 'text-slate-400 hover:bg-slate-700'
+                    } ${isSelf ? 'cursor-not-allowed opacity-70' : ''}`}
+                  >
+                    {u.role || 'user'}
+                  </button>
+                </div>
+
+                <div className="flex gap-2 mt-2">
+                  <button
+                    disabled={isSelf || u.status === 'approved'}
+                    onClick={() => handleUpdateStatus(u.uid, 'approved')}
+                    className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${
+                      u.status === 'approved'
+                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 cursor-not-allowed opacity-60'
+                        : 'bg-emerald-600/20 hover:bg-emerald-600 hover:text-white border-emerald-500/30 text-emerald-400'
+                    } ${isSelf ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    Setujui
+                  </button>
+                  <button
+                    disabled={isSelf || u.status === 'rejected'}
+                    onClick={() => handleUpdateStatus(u.uid, 'rejected')}
+                    className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${
+                      u.status === 'rejected'
+                        ? 'bg-red-500/10 border-red-500/20 text-red-400 cursor-not-allowed opacity-60'
+                        : 'bg-red-600/20 hover:bg-red-600 hover:text-white border-red-500/30 text-red-400'
+                    } ${isSelf ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    Tolak
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </motion.div>
   );
 }
