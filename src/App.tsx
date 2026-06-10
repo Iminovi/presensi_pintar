@@ -28,50 +28,54 @@ import {
   Settings,
   Circle,
   Activity,
-  Download
+  Download,
+  Smartphone,
+  MapPin,
+  Lock,
+  Compass,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-// --- Types ---
-interface Employee {
-  id: string;
-  name: string;
-  fingerprintId: number;
-  position: string;
-}
-
-interface Attendance {
-  id: string;
-  employeeId: string;
-  employeeName: string;
-  timestamp: any;
-  type: 'in' | 'out';
-}
-
-interface DeviceConfig {
-  mode: 'idle' | 'enroll' | 'verify';
-  enrollTargetId: number;
-  message: string;
-  lastActive?: any;
-}
-
-interface UserProfile {
-  uid: string;
-  name: string;
-  email: string;
-  status: 'pending' | 'approved' | 'rejected';
-  role: 'admin' | 'user';
-  createdAt?: any;
-}
+// Import Types and Components
+import { Employee, Attendance, DeviceConfig, UserProfile, OfficeConfig } from './types';
+import MobileAttendanceView from './components/MobileAttendanceView';
 
 // --- Main App Component ---
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [activeTab, setActiveTab] = useState<'attendance' | 'employees' | 'device' | 'users'>('attendance');
+  const [activeTab, setActiveTab] = useState<'attendance' | 'employees' | 'device' | 'users' | 'absen-mobile'>('attendance');
   const [loading, setLoading] = useState(true);
   const [deviceConfig, setDeviceConfig] = useState<DeviceConfig | null>(null);
   const [isDeviceConnected, setIsDeviceConnected] = useState<boolean>(false);
+
+  // Office GPS Geofence boundary configuration
+  const [officeConfig, setOfficeConfig] = useState<OfficeConfig>({
+    latitude: -6.175392,
+    longitude: 106.827153,
+    radius: 5,
+    locationName: "Kantor Pusat"
+  });
+
+  // Track office config from cloud
+  useEffect(() => {
+    if (!user) return;
+    const unsubOffice = onSnapshot(doc(db, 'office', 'config'), (snap) => {
+      if (snap.exists()) {
+        setOfficeConfig(snap.data() as OfficeConfig);
+      } else {
+        setDoc(doc(db, 'office', 'config'), {
+          latitude: -6.175392,
+          longitude: 106.827153,
+          radius: 5,
+          locationName: "Kantor Pusat"
+        });
+      }
+    });
+
+    return () => unsubOffice();
+  }, [user]);
 
   useEffect(() => {
     let unsubDoc: (() => void) | null = null;
@@ -261,6 +265,12 @@ export default function App() {
               label="Kehadiran" 
             />
             <NavButton 
+              active={activeTab === 'absen-mobile'} 
+              onClick={() => setActiveTab('absen-mobile')}
+              icon={<Smartphone size={20} />}
+              label="Absen Mobile" 
+            />
+            <NavButton 
               active={activeTab === 'employees'} 
               onClick={() => setActiveTab('employees')}
               icon={<Users size={20} />}
@@ -301,7 +311,7 @@ export default function App() {
             <div>
               <p className="text-[10px] uppercase tracking-[0.2em] font-mono text-slate-500 mb-1">DASHBOARD</p>
               <h2 className="text-4xl font-bold text-slate-100">
-                {activeTab === 'attendance' ? 'Log Kehadiran' : activeTab === 'employees' ? 'Daftar Karyawan' : activeTab === 'device' ? 'Konfigurasi Alat' : 'Persetujuan Akun'}
+                {activeTab === 'attendance' ? 'Log Kehadiran' : activeTab === 'absen-mobile' ? 'Absen Smartphone' : activeTab === 'employees' ? 'Daftar Karyawan' : activeTab === 'device' ? 'Konfigurasi Alat' : 'Persetujuan Akun'}
               </h2>
             </div>
             <div className="hidden md:flex items-center gap-4 text-right">
@@ -328,8 +338,9 @@ export default function App() {
         <AnimatePresence mode="wait">
           {activeTab === 'attendance' && <AttendanceView key="att" />}
           {activeTab === 'employees' && <EmployeeView key="emp" />}
-          {activeTab === 'device' && <DeviceView key="dev" config={deviceConfig} isConnected={isDeviceConnected} />}
+          {activeTab === 'device' && <DeviceView key="dev" config={deviceConfig} isConnected={isDeviceConnected} officeConfig={officeConfig} profile={profile} />}
           {activeTab === 'users' && <UsersApprovalView key="usr" />}
+          {activeTab === 'absen-mobile' && profile && <MobileAttendanceView key="mob" userProfile={profile} officeConfig={officeConfig} />}
         </AnimatePresence>
       </main>
     </div>
@@ -629,7 +640,23 @@ function EmployeeView() {
   );
 }
 
-function DeviceView({ config, isConnected }: { config: DeviceConfig | null, isConnected: boolean, key?: any }) {
+function DeviceView({ config, isConnected, officeConfig, profile }: { config: DeviceConfig | null, isConnected: boolean, officeConfig: OfficeConfig, profile: UserProfile | null, key?: any }) {
+  const [latInput, setLatInput] = useState(officeConfig.latitude.toString());
+  const [lngInput, setLngInput] = useState(officeConfig.longitude.toString());
+  const [radiusInput, setRadiusInput] = useState(officeConfig.radius.toString());
+  const [locNameInput, setLocNameInput] = useState(officeConfig.locationName || 'Kantor Pusat');
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
+
+  useEffect(() => {
+    if (officeConfig) {
+      setLatInput(officeConfig.latitude.toString());
+      setLngInput(officeConfig.longitude.toString());
+      setRadiusInput(officeConfig.radius.toString());
+      setLocNameInput(officeConfig.locationName || 'Kantor Pusat');
+    }
+  }, [officeConfig]);
+
   const updateMode = async (mode: 'verify' | 'enroll' | 'idle', targetId?: number) => {
     try {
       await setDoc(doc(db, 'deviceConfigs', 'main-nodedcu'), { 
@@ -642,6 +669,71 @@ function DeviceView({ config, isConnected }: { config: DeviceConfig | null, isCo
     }
   };
 
+  const handleUpdateOffice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile || profile.role !== 'admin') {
+      alert("Hanya Administrator yang diperbolehkan mengubah jangkauan GPS kantor!");
+      return;
+    }
+    setIsUpdating(true);
+    try {
+      await setDoc(doc(db, 'office', 'config'), {
+        latitude: parseFloat(latInput),
+        longitude: parseFloat(lngInput),
+        radius: parseFloat(radiusInput),
+        locationName: locNameInput
+      }, { merge: true });
+      alert("Koordinat GPS dan radius kehadiran kantor berhasil diperbarui!");
+    } catch (err) {
+      console.error("Error updating office location:", err);
+      alert("Gagal memperbarui konfigurasi kantor.");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleSetCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Browser Anda tidak mendukung Geolocation.");
+      return;
+    }
+
+    setIsLocating(true);
+
+    const options = {
+      enableHighAccuracy: true,
+      timeout: 8000,
+      maximumAge: 0
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLatInput(pos.coords.latitude.toString());
+        setLngInput(pos.coords.longitude.toString());
+        setIsLocating(false);
+      },
+      (err) => {
+        console.warn("Gagal mendapatkan lokasi dengan akurasi tinggi, mencoba akurasi rendah...", err);
+        // Fallback to low-accuracy immediately if high accuracy times out/fails
+        navigator.geolocation.getCurrentPosition(
+          (fallbackPos) => {
+            setLatInput(fallbackPos.coords.latitude.toString());
+            setLngInput(fallbackPos.coords.longitude.toString());
+            setIsLocating(false);
+          },
+          (fallbackErr) => {
+            setIsLocating(false);
+            alert(`Gagal membaca GPS saat ini.\nDetail: ${fallbackErr.message} (Code: ${fallbackErr.code})\n\nPastikan Anda telah menyetujui izin lokasi di browser Anda.`);
+          },
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+        );
+      },
+      options
+    );
+  };
+
+  const isAdmin = profile?.role === 'admin';
+
   return (
     <motion.div 
       initial={{ opacity: 0, scale: 0.95 }}
@@ -649,6 +741,7 @@ function DeviceView({ config, isConnected }: { config: DeviceConfig | null, isCo
       exit={{ opacity: 0, scale: 0.95 }}
       className="grid grid-cols-1 lg:grid-cols-12 gap-6"
     >
+      {/* Col 1: Hardware Link */}
       <div className="lg:col-span-4 bento-card border-cyan-500/30 flex flex-col justify-between h-full">
         <div>
           <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Live Hardware Status</h2>
@@ -680,48 +773,51 @@ function DeviceView({ config, isConnected }: { config: DeviceConfig | null, isCo
         </div>
       </div>
 
-      <div className="lg:col-span-5 bento-card space-y-8">
-        <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Hardware Control Panel</h2>
-        
-        <div className="space-y-6">
-          <div>
-            <h3 className="text-[10px] uppercase font-mono tracking-widest text-slate-400 mb-3">Operating Mode Selection</h3>
-            <div className="flex gap-3">
-              <ModeButton 
-                active={config?.mode === 'verify'} 
-                onClick={() => updateMode('verify')}
-                label="Verify" 
-              />
-              <ModeButton 
-                active={config?.mode === 'enroll'} 
-                onClick={() => {
-                  const id = prompt('Masukkan ID Sidik Jari (1-127):', '1');
-                  if (id) updateMode('enroll', parseInt(id));
-                }}
-                label="Enroll" 
-              />
-              <ModeButton 
-                active={config?.mode === 'idle'} 
-                onClick={() => updateMode('idle')}
-                label="Idle" 
-              />
+      {/* Col 2: Hardware Control */}
+      <div className="lg:col-span-4 bento-card space-y-8 flex flex-col justify-between h-full">
+        <div>
+          <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Hardware Control Panel</h2>
+          
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-[10px] uppercase font-mono tracking-widest text-slate-400 mb-3">Operating Mode Selection</h3>
+              <div className="flex gap-3">
+                <ModeButton 
+                  active={config?.mode === 'verify'} 
+                  onClick={() => updateMode('verify')}
+                  label="Verify" 
+                />
+                <ModeButton 
+                  active={config?.mode === 'enroll'} 
+                  onClick={() => {
+                    const id = prompt('Masukkan ID Sidik Jari (1-127):', '1');
+                    if (id) updateMode('enroll', parseInt(id));
+                  }}
+                  label="Enroll" 
+                />
+                <ModeButton 
+                  active={config?.mode === 'idle'} 
+                  onClick={() => updateMode('idle')}
+                  label="Idle" 
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 bg-slate-900 rounded-2xl border border-slate-700/50">
-              <p className="text-[10px] uppercase font-mono tracking-widest text-slate-500 mb-1">LCD Message</p>
-              <p className="font-mono text-sm text-cyan-400 truncate">{config?.message || 'Ready'}</p>
-            </div>
-            <div className="p-4 bg-slate-900 rounded-2xl border border-slate-700/50">
-              <p className="text-[10px] uppercase font-mono tracking-widest text-slate-500 mb-1">Target ID</p>
-              <p className="font-mono text-sm text-slate-100">{config?.enrollTargetId || '--'}</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 bg-slate-900 rounded-2xl border border-slate-700/50">
+                <p className="text-[10px] uppercase font-mono tracking-widest text-slate-500 mb-1">LCD Message</p>
+                <p className="font-mono text-xs text-cyan-400 truncate">{config?.message || 'Ready'}</p>
+              </div>
+              <div className="p-4 bg-slate-900 rounded-2xl border border-slate-700/50">
+                <p className="text-[10px] uppercase font-mono tracking-widest text-slate-500 mb-1">Target ID</p>
+                <p className="font-mono text-xs text-slate-100">{config?.enrollTargetId || '--'}</p>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="bg-slate-900/40 p-4 rounded-xl">
-           <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4">Diagnostics</h3>
+        <div className="bg-slate-900/40 p-4 rounded-xl mt-4">
+           <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Diagnostics</h3>
            <div className="space-y-2">
               <div className="flex justify-between font-mono text-[9px]">
                 <span className="text-slate-500 uppercase">Heap Memory</span>
@@ -734,27 +830,103 @@ function DeviceView({ config, isConnected }: { config: DeviceConfig | null, isCo
         </div>
       </div>
 
-      <div className="lg:col-span-3 bento-card bg-cyan-600/5 border-cyan-500/20">
-        <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Hardware Setup</h2>
-        <div className="space-y-6">
-          <div className="flex gap-4">
-            <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold shrink-0 text-xs">1</div>
-            <div className="text-[11px] text-slate-300 leading-relaxed font-mono">TX Scanner &rarr; NodeMCU D2</div>
-          </div>
-          <div className="flex gap-4">
-            <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold shrink-0 text-xs">2</div>
-            <div className="text-[11px] text-slate-300 leading-relaxed font-mono">RX Scanner &rarr; NodeMCU D3</div>
-          </div>
-          <div className="flex gap-4">
-            <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold shrink-0 text-xs">3</div>
-            <div className="text-[11px] text-slate-300 leading-relaxed font-mono">Use Firebase-ESP8266 library in Arduino IDE</div>
-          </div>
+      {/* Col 3: GPS Geofence Settings */}
+      <div className="lg:col-span-4 bento-card border-cyan-500/10 flex flex-col justify-between h-full">
+        <div>
+          <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Konfigurasi Radius Kantor</h2>
+          
+          <form onSubmit={handleUpdateOffice} className="space-y-4">
+            <div>
+              <label className="text-[10px] font-mono text-slate-400 block mb-1 uppercase">Nama Lokasi</label>
+              <input
+                disabled={!isAdmin}
+                type="text"
+                required
+                value={locNameInput}
+                onChange={(e) => setLocNameInput(e.target.value)}
+                className="w-full text-xs font-mono bg-slate-900 border border-slate-750 p-2.5 rounded-xl text-slate-200 outline-none focus:border-cyan-500/50"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-mono text-slate-400 block mb-1 uppercase">Latitude</label>
+                <input
+                  disabled={!isAdmin}
+                  type="number"
+                  step="any"
+                  required
+                  value={latInput}
+                  onChange={(e) => setLatInput(e.target.value)}
+                  className="w-full text-xs font-mono bg-slate-900 border border-slate-750 p-2.5 rounded-xl text-slate-200 outline-none focus:border-cyan-500/50"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-mono text-slate-400 block mb-1 uppercase">Longitude</label>
+                <input
+                  disabled={!isAdmin}
+                  type="number"
+                  step="any"
+                  required
+                  value={lngInput}
+                  onChange={(e) => setLngInput(e.target.value)}
+                  className="w-full text-xs font-mono bg-slate-900 border border-slate-750 p-2.5 rounded-xl text-slate-200 outline-none focus:border-cyan-500/50"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-mono text-slate-400 block mb-1 uppercase">Radius Valid (Meter)</label>
+              <input
+                disabled={!isAdmin}
+                type="number"
+                min="2"
+                max="500"
+                required
+                value={radiusInput}
+                onChange={(e) => setRadiusInput(e.target.value)}
+                className="w-full text-xs font-mono bg-slate-900 border border-slate-750 p-2.5 rounded-xl text-slate-200 outline-none focus:border-cyan-500/50"
+              />
+            </div>
+
+            {isAdmin && (
+              <div className="flex flex-col gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleSetCurrentLocation}
+                  disabled={isLocating}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-750 hover:text-cyan-400 text-slate-300 font-bold rounded-xl text-[10px] uppercase font-mono transition-all border border-slate-700/60 flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  {isLocating ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin text-cyan-400" />
+                      Membaca GPS...
+                    </>
+                  ) : (
+                    <>
+                      <Compass size={12} className="animate-pulse" />
+                      Gunakan GPS Saya Saat Ini
+                    </>
+                  )}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdating}
+                  className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-[10px] uppercase font-mono transition-all tracking-wider disabled:opacity-50"
+                >
+                  {isUpdating ? 'Menyimpan...' : 'Simpan Lokasi Kantor'}
+                </button>
+              </div>
+            )}
+          </form>
         </div>
-        
-        <div className="mt-10 pt-6 border-t border-cyan-500/10">
-           <div className="p-3 bg-slate-900 rounded-xl border border-slate-700/50">
-             <div className="text-[9px] text-slate-500 uppercase mb-1 font-mono">Project ID</div>
-             <div className="font-mono text-[10px] text-cyan-400">{(firebaseConfig as any).projectId}</div>
+
+        <div className="mt-4 pt-3 border-t border-cyan-500/10">
+           <div className="p-3 bg-slate-900 rounded-xl border border-slate-705">
+             <div className="text-[8px] text-slate-500 uppercase mb-1 font-mono">Status Sistem</div>
+             <div className="font-mono text-[9px] text-cyan-400">
+               {isAdmin ? 'ADMIN MODE - EDIT ENABLED' : 'USER MODE - SECURE READ ONLY'}
+             </div>
            </div>
         </div>
       </div>

@@ -25,9 +25,10 @@ service cloud.firestore {
 
     // Helper for Employee validation
     function isValidEmployee(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             data.fingerprintId is int && data.fingerprintId >= 0 && data.fingerprintId <= 500 &&
-             (!('position' in data) || (data.position is string && data.position.size() <= 100));
+      return (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 100)) &&
+             (!('fingerprintId' in data) || (data.fingerprintId is int || data.fingerprintId is float || data.fingerprintId is number || data.fingerprintId is string)) &&
+             (!('position' in data) || (data.position is string && data.position.size() <= 100)) &&
+             (!('facePhoto' in data) || (data.facePhoto is string));
     }
 
     // Helper for Attendance validation
@@ -49,7 +50,7 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && isValidEmployee(incoming()) && (incoming().createdAt == request.time);
       allow update: if isSignedIn() && isValidEmployee(incoming()) && 
-                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'fingerprintId', 'position']);
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'fingerprintId', 'position', 'facePhoto']);
       allow delete: if isSignedIn();
     }
 
@@ -70,6 +71,12 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // Office perimeter settings
+    match /office/{docId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn();
     }
