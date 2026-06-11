@@ -55,46 +55,80 @@ async function startServer() {
       const live = cleanBase64(livePhoto);
       const profile = cleanBase64(profilePhoto);
 
-      // Perform facial comparison with Gemini 3.5 Flash
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: [
-          {
-            inlineData: {
-              data: live.data,
-              mimeType: live.mimeType,
-            },
-          },
-          {
-            inlineData: {
-              data: profile.data,
-              mimeType: profile.mimeType,
-            },
-          },
-          "Bandingkan kedua foto wajah di atas. Foto 1 adalah foto live karyawan saat melakukan absen mandiri via smartphone. Foto 2 adalah foto referensi profil karyawan yang telah terdaftar. Verifikasi apakah wajah di Foto 1 adalah orang yang sama dengan yang ada di Foto 2. Mohon analisa landmark wajah utama seperti mata, hidung, mulut, bentuk wajah, kerutan, dan kemiripan biometrik lainnya meskipun ada perbedaan pencahayaan atau ekspresi. Berikan respon akhir Anda dalam format JSON terstruktur.",
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              verified: {
-                type: Type.BOOLEAN,
-                description: "True jika itu adalah orang yang sama, False jika berbeda, tidak mirip atau bukan wajah manusia.",
+      // Perform facial comparison with Gemini 3.5 Flash (with retries for robust handling of 503/transient errors)
+      let response;
+      let lastError: any = null;
+      const maxRetries = 4;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          response = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: [
+              {
+                inlineData: {
+                  data: live.data,
+                  mimeType: live.mimeType,
+                },
               },
-              confidence: {
-                type: Type.NUMBER,
-                description: "Persentase kecocokan atau keyakinan analisis dalam jangkauan 0 s.d. 100.",
+              {
+                inlineData: {
+                  data: profile.data,
+                  mimeType: profile.mimeType,
+                },
               },
-              reason: {
-                type: Type.STRING,
-                description: "Penjelasan lengkap, objektif, dan informatif mengenai perbandingan ini dalam Bahasa Indonesia.",
+              "Bandingkan kedua foto wajah di atas. Foto 1 adalah foto live karyawan saat melakukan absen mandiri via smartphone. Foto 2 adalah foto referensi profil karyawan yang telah terdaftar. Verifikasi apakah wajah di Foto 1 adalah orang yang sama dengan yang ada di Foto 2. Mohon analisa landmark wajah utama seperti mata, hidung, mulut, bentuk wajah, kerutan, dan kemiripan biometrik lainnya meskipun ada perbedaan pencahayaan atau ekspresi. Berikan respon akhir Anda dalam format JSON terstruktur.",
+            ],
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  verified: {
+                    type: Type.BOOLEAN,
+                    description: "True jika itu adalah orang yang sama, False jika berbeda, tidak mirip atau bukan wajah manusia.",
+                  },
+                  confidence: {
+                    type: Type.NUMBER,
+                    description: "Persentase kecocokan atau keyakinan analisis dalam jangkauan 0 s.d. 100.",
+                  },
+                  reason: {
+                    type: Type.STRING,
+                    description: "Penjelasan lengkap, objektif, dan informatif mengenai perbandingan ini dalam Bahasa Indonesia.",
+                  },
+                },
+                required: ["verified", "confidence", "reason"],
               },
             },
-            required: ["verified", "confidence", "reason"],
-          },
-        },
-      });
+          });
+          // Successful call! Break out of the retry loop.
+          break;
+        } catch (err: any) {
+          lastError = err;
+          const status = err.status || (err.error && err.error.status);
+          const code = err.code || (err.error && err.error.code);
+          const isRateLimitOrBusy = 
+            status === "UNAVAILABLE" || 
+            code === 503 || 
+            code === 429 || 
+            (err.message && err.message.toLowerCase().includes("high demand")) ||
+            (err.message && err.message.toLowerCase().includes("temporary"));
+
+          if (isRateLimitOrBusy && attempt < maxRetries) {
+            const delayMs = attempt * 2000; // 2s, 4s, 6s
+            console.warn(`Gemini API busy (503/429/high demand) on attempt ${attempt}/${maxRetries}. Retrying in ${delayMs}ms... Error:`, err.message || err);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          } else {
+            // Unrecoverable error or exceeded maximum retries
+            console.error(`Gemini API call failed permanently on attempt ${attempt}. Error:`, err.message || err);
+            break;
+          }
+        }
+      }
+
+      if (!response) {
+        throw lastError || new Error("Failed to communicate with Gemini API after multiple attempts.");
+      }
 
       const responseText = response.text || "{}";
       const resultObj = JSON.parse(responseText.trim());
