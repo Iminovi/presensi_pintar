@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'Presensi Pintar',
   webDir: 'dist',
   server: {
-    url: 'https://NAMA-PROJECT-ANDA.vercel.app', // PENTING: Ganti dengan URL Vercel Anda yang sebenarnya!
+    url: 'https://presensi-pintar.vercel.app/', // PENTING: Ganti dengan URL Vercel Anda yang sebenarnya!
     cleartext: true
   }
 };
