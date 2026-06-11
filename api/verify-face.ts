@@ -46,7 +46,7 @@ export default async function handler(req: any, res: any) {
 
     // Analisis dengan Gemini
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-3.5-flash",
       contents: [
         { inlineData: { data: live.data, mimeType: live.mimeType } },
         { inlineData: { data: profile.data, mimeType: profile.mimeType } },

@@ -55,9 +55,9 @@ async function startServer() {
       const live = cleanBase64(livePhoto);
       const profile = cleanBase64(profilePhoto);
 
-      // Perform facial comparison with Gemini 2.0 Flash
+      // Perform facial comparison with Gemini 3.5 Flash
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-3.5-flash",
         contents: [
           {
             inlineData: {
