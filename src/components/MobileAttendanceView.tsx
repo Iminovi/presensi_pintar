@@ -586,6 +586,7 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
   const [loadingCamera, setLoadingCamera] = useState(true);
 
   useEffect(() => {
+    let localStream: MediaStream | null = null;
     async function startCamera() {
       try {
         setLoadingCamera(true);
@@ -597,10 +598,8 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
           }, 
           audio: false 
         });
+        localStream = s;
         setStream(s);
-        if (videoRef.current) {
-          videoRef.current.srcObject = s;
-        }
         setLoadingCamera(false);
       } catch (err: any) {
         console.error("Camera access error:", err);
@@ -612,11 +611,18 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
     startCamera();
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
+
+  // Menempelkan stream kamera ke elemen video SETELAH loading selesai dan video sudah dirender di layar
+  useEffect(() => {
+    if (!loadingCamera && !error && stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [loadingCamera, error, stream]);
 
   const handleCapture = () => {
     if (videoRef.current) {
