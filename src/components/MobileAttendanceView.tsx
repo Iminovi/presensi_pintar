@@ -485,7 +485,7 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
 
                   <div className="md:col-span-8 space-y-4">
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      Sistem akan mengambil foto silsilah wajah Anda secara real-time dan mencocokannya dengan <span className="text-cyan-400 font-bold">Teknologi Google Gemini AI</span> untuk memastikan kecocokan identitas Anda secara akurat serta memverifikasi lokasi GPS HP Anda.
+                      Sistem akan mengambil foto silsilah wajah Anda secara real-time dan mencocokannya dengan <span className="text-cyan-400 font-bold">Artificial Intelligence</span> untuk memastikan kecocokan identitas Anda secara akurat serta memverifikasi lokasi GPS HP Anda.
                     </p>
 
                     <div className="flex gap-4">
@@ -526,7 +526,7 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
                 <Loader2 size={48} className="animate-spin text-cyan-500 mb-4" />
                 <h3 className="text-lg font-bold text-slate-100 font-sans">Menjalankan Verifikasi Biometrik AI</h3>
                 <p className="text-xs text-slate-400 max-w-sm leading-relaxed mt-2 animate-pulse">
-                  Gemini AI sedang membandingkan foto wajah live Anda dengan model database. Mohon tunggu beberapa detik...
+                  AI sedang membandingkan foto wajah live Anda dengan model database. Mohon tunggu beberapa detik...
                 </p>
               </div>
             )}
