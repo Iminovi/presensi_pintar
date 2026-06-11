@@ -614,9 +614,6 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
           audio: false 
         });
         setStream(s);
-        if (videoRef.current) {
-          videoRef.current.srcObject = s;
-        }
         setLoadingCamera(false);
       } catch (err: any) {
         console.error("Camera access error:", err);
@@ -633,6 +630,13 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
       }
     };
   }, []);
+
+  // Menempelkan stream ke elemen video SETELAH loading selesai dan elemen sudah ada di layar
+  useEffect(() => {
+    if (!loadingCamera && !error && stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [loadingCamera, error, stream]);
 
   const handleCapture = () => {
     if (videoRef.current) {
