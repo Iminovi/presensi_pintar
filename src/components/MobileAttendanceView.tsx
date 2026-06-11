@@ -38,13 +38,11 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
   const [currentEmployee, setCurrentEmployee] = useState<Employee | null>(null);
   const [isLinking, setIsLinking] = useState(false);
   const [selectedEmpId, setSelectedEmpId] = useState('');
-  const [linkedIds, setLinkedIds] = useState<Set<string>>(new Set());
   
   // GPS State
   const [gpsLocation, setGpsLocation] = useState<GeolocationPosition | null>(null);
   const [gpsError, setGpsError] = useState('');
   const [gpsLoading, setGpsLoading] = useState(true);
-  const [isSuspiciousGPS, setIsSuspiciousGPS] = useState(false);
 
   // Camera Capture Modal
   const [showCamera, setShowCamera] = useState(false);
@@ -85,21 +83,6 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
     return unsubscribe;
   }, [userProfile.employeeId, userProfile.name]);
 
-  // Fetch already linked profiles
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'users'), (snap) => {
-      const ids = new Set<string>();
-      snap.docs.forEach(d => {
-        const data = d.data();
-        if (data.employeeId && d.id !== userProfile.uid) {
-          ids.add(data.employeeId);
-        }
-      });
-      setLinkedIds(ids);
-    });
-    return unsub;
-  }, [userProfile.uid]);
-
   // Track coordinates
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -113,16 +96,6 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
         setGpsLocation(position);
         setGpsError('');
         setGpsLoading(false);
-
-        // Anti Fake-GPS Heuristic Check
-        const { altitude, speed, heading } = position.coords;
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        
-        if (isMobile && altitude === null && speed === null && heading === null) {
-          setIsSuspiciousGPS(true); // Kemungkinan besar menggunakan aplikasi Fake GPS
-        } else {
-          setIsSuspiciousGPS(false);
-        }
       },
       (err) => {
         console.error("GPS Error:", err);
@@ -191,10 +164,6 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
   };
 
   const startAttendanceCheck = (type: 'in' | 'out') => {
-    if (isSuspiciousGPS) {
-      alert("Akses ditolak. Sistem mendeteksi indikasi penggunaan Aplikasi Fake GPS / Mock Location.");
-      return;
-    }
     if (!isWithinRadius) {
       alert(`Anda berada di luar radius presensi kantor! Jarak Anda: ${distance ? distance.toFixed(1) : '---'}m (Radius max: ${officeConfig.radius}m)`);
       return;
@@ -321,7 +290,7 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
                   className="bg-slate-900 border border-slate-700 text-slate-100 rounded-xl p-3 focus:border-cyan-500 outline-none text-xs flex-1"
                 >
                   <option value="">-- Pilih Profil Anda --</option>
-                  {employees.filter(emp => !linkedIds.has(emp.id)).map(emp => (
+                  {employees.map(emp => (
                     <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
                   ))}
                 </select>
@@ -383,11 +352,9 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
                   }`}>
                     <div className="flex justify-between items-center mb-3">
                       <span className="text-[10px] font-mono font-bold tracking-widest uppercase">
-                        {isSuspiciousGPS ? 'GPS Dicurigai Palsu' : 'Sinyal GPS Akurat'}
+                        Sinyal GPS Akurat
                       </span>
-                      {isSuspiciousGPS ? (
-                        <ShieldAlert size={16} className="text-red-400" />
-                      ) : isWithinRadius ? (
+                      {isWithinRadius ? (
                         <CheckCircle2 size={16} className="text-emerald-400 animate-pulse" />
                       ) : (
                         <Lock size={16} className="text-red-400" />
@@ -411,15 +378,6 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
                         {isWithinRadius ? '✓ Berada Di Dalam Radius Kantor' : '⚠ Di Luar Radius Kantor (Min 5m)'}
                       </div>
                     </div>
-                  </div>
-                )}
-                
-                {isSuspiciousGPS && !gpsLoading && !gpsError && (
-                  <div className="p-3 bg-red-500/15 border border-red-500/30 rounded-xl flex items-start gap-2.5 mt-3 shadow-lg shadow-red-500/10">
-                    <ShieldAlert size={16} className="text-red-400 shrink-0 mt-0.5" />
-                    <span className="text-[10px] text-red-400 leading-relaxed font-bold">
-                      Akses Dikunci: Terdeteksi penggunaan Fake GPS. Harap matikan aplikasi Mock Location atau melangkah ke luar ruangan untuk mendapatkan sinyal GPS fisik (3D).
-                    </span>
                   </div>
                 )}
               </div>
@@ -485,15 +443,15 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
 
                   <div className="md:col-span-8 space-y-4">
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      Sistem akan mengambil foto silsilah wajah Anda secara real-time dan mencocokannya dengan <span className="text-cyan-400 font-bold">Artificial Intelligence</span> untuk memastikan kecocokan identitas Anda secara akurat serta memverifikasi lokasi GPS HP Anda.
+                      Sistem akan mengambil foto silsilah wajah Anda secara real-time dan mencocokannya dengan <span className="text-cyan-400 font-bold">Teknologi Google Gemini AI</span> untuk memastikan kecocokan identitas Anda secara akurat serta memverifikasi lokasi GPS HP Anda.
                     </p>
 
                     <div className="flex gap-4">
                       <button
                         onClick={() => startAttendanceCheck('in')}
-                        disabled={gpsLoading || !isWithinRadius || isSuspiciousGPS}
+                        disabled={gpsLoading || !isWithinRadius}
                         className={`flex-1 flex flex-col items-center justify-center py-4 px-3 rounded-2xl border font-bold transition-all ${
-                          !isWithinRadius || isSuspiciousGPS
+                          !isWithinRadius 
                             ? 'bg-slate-800/40 border-slate-750 text-slate-500 cursor-not-allowed' 
                             : 'bg-emerald-600/10 hover:bg-emerald-600/20 border-emerald-500/30 text-emerald-400 active:scale-95'
                         }`}
@@ -504,9 +462,9 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
 
                       <button
                         onClick={() => startAttendanceCheck('out')}
-                        disabled={gpsLoading || !isWithinRadius || isSuspiciousGPS}
+                        disabled={gpsLoading || !isWithinRadius}
                         className={`flex-1 flex flex-col items-center justify-center py-4 px-3 rounded-2xl border font-bold transition-all ${
-                          !isWithinRadius || isSuspiciousGPS
+                          !isWithinRadius 
                             ? 'bg-slate-800/40 border-slate-750 text-slate-500 cursor-not-allowed' 
                             : 'bg-amber-600/10 hover:bg-amber-600/20 border-amber-500/30 text-amber-400 active:scale-95'
                         }`}
@@ -526,7 +484,7 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
                 <Loader2 size={48} className="animate-spin text-cyan-500 mb-4" />
                 <h3 className="text-lg font-bold text-slate-100 font-sans">Menjalankan Verifikasi Biometrik AI</h3>
                 <p className="text-xs text-slate-400 max-w-sm leading-relaxed mt-2 animate-pulse">
-                  AI sedang membandingkan foto wajah live Anda dengan model database. Mohon tunggu beberapa detik...
+                  Gemini AI sedang membandingkan foto wajah live Anda dengan model database. Mohon tunggu beberapa detik...
                 </p>
               </div>
             )}
@@ -544,37 +502,63 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
                       : 'bg-red-500/5 border-red-500/30'
                   }`}
                 >
-                  <div className="flex items-start gap-4">
-                    {verificationResult.verified ? (
-                      <div className="bg-emerald-500/20 text-emerald-400 p-3 rounded-2xl shrink-0">
-                        <CheckCircle2 size={28} />
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-start gap-4">
+                      {verificationResult.verified ? (
+                        <div className="bg-emerald-500/20 text-emerald-400 p-3 rounded-2xl shrink-0">
+                          <CheckCircle2 size={28} />
+                        </div>
+                      ) : (
+                        <div className="bg-red-500/20 text-red-400 p-3 rounded-2xl shrink-0">
+                          <ShieldAlert size={28} />
+                        </div>
+                      )}
+                      <div className="space-y-1.5 flex-1">
+                        <div className="flex justify-between items-center flex-wrap gap-2">
+                          <h4 className={`text-md font-bold uppercase tracking-wide ${
+                            verificationResult.verified ? 'text-emerald-400' : 'text-red-400'
+                          }`}>
+                            {verificationResult.verified ? 'Verifikasi Wajah Berhasil!' : 'Verifikasi Wajah Gagal'}
+                          </h4>
+                          {verificationResult.confidence > 0 && (
+                            <span className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg border ${
+                              verificationResult.verified 
+                                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+                                : 'bg-red-500/10 border-red-500/20 text-red-500'
+                            }`}>
+                              Match: {verificationResult.confidence}%
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed font-sans mt-2">
+                          {verificationResult.reason}
+                        </p>
                       </div>
-                    ) : (
-                      <div className="bg-red-500/20 text-red-400 p-3 rounded-2xl shrink-0">
-                        <ShieldAlert size={28} />
+                    </div>
+
+                    {/* Quota Exceeded Helpful Banner */}
+                    {!verificationResult.verified && (verificationResult.reason?.toLowerCase().includes('quota') || verificationResult.reason?.toLowerCase().includes('exceeded') || verificationResult.reason?.toLowerCase().includes('429') || verificationResult.reason?.toLowerCase().includes('exhausted')) && (
+                      <div className="mt-2 p-4 bg-amber-500/10 border border-amber-500/25 rounded-xl text-slate-300 text-xs leading-relaxed space-y-3">
+                        <div className="flex items-center gap-2 text-amber-400 font-bold uppercase tracking-wider text-[10px] font-mono">
+                          <ShieldAlert size={14} className="animate-pulse" />
+                          Informasi Limit Harian Google AI Studio (Free Tier)
+                        </div>
+                        <p>
+                          Akun Anda saat ini menggunakan <strong className="text-amber-300">Free Tier (API Key Gratisan)</strong> untuk model <code className="bg-slate-900 px-1 py-0.5 rounded font-mono text-[11px] text-cyan-400">gemini-flash-latest</code>. Kuota harian untuk API gratisan sangat dibatasi oleh Google AI Studio.
+                        </p>
+                        <div className="pt-1.5 space-y-1 border-t border-amber-500/10 text-[11px]">
+                          <p className="font-semibold text-slate-200">Bagaimana cara mengatasi ini?</p>
+                          <ul className="list-disc pl-4 space-y-1 text-slate-300">
+                            <li>
+                              <strong className="text-slate-100">Beralih ke Paid Tier (Pay-As-You-Go):</strong> Admin dapat mengaktifkan billing kartu kredit/debit di akun Google AI Studio Anda untuk memperoleh limit kuota yang sangat besar (hampir tanpa batas untuk absen harian).
+                            </li>
+                            <li>
+                              <strong className="text-slate-100">Menunggu Reset Kuota:</strong> Kuota harian Anda akan di-reset otomatis setiap hari oleh sistem Google Cloud.
+                            </li>
+                          </ul>
+                        </div>
                       </div>
                     )}
-                    <div className="space-y-1.5 flex-1">
-                      <div className="flex justify-between items-center flex-wrap gap-2">
-                        <h4 className={`text-md font-bold uppercase tracking-wide ${
-                          verificationResult.verified ? 'text-emerald-400' : 'text-red-400'
-                        }`}>
-                          {verificationResult.verified ? 'Verifikasi Wajah Berhasil!' : 'Verifikasi Wajah Gagal'}
-                        </h4>
-                        {verificationResult.confidence > 0 && (
-                          <span className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg border ${
-                            verificationResult.verified 
-                              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
-                              : 'bg-red-500/10 border-red-500/20 text-red-500'
-                          }`}>
-                            Match: {verificationResult.confidence}%
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-300 leading-relaxed font-sans mt-2">
-                        {verificationResult.reason}
-                      </p>
-                    </div>
                   </div>
                 </motion.div>
               )}
@@ -602,7 +586,6 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
   const [loadingCamera, setLoadingCamera] = useState(true);
 
   useEffect(() => {
-    let localStream: MediaStream | null = null;
     async function startCamera() {
       try {
         setLoadingCamera(true);
@@ -614,8 +597,10 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
           }, 
           audio: false 
         });
-        localStream = s;
         setStream(s);
+        if (videoRef.current) {
+          videoRef.current.srcObject = s;
+        }
         setLoadingCamera(false);
       } catch (err: any) {
         console.error("Camera access error:", err);
@@ -627,18 +612,11 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
     startCamera();
 
     return () => {
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
-
-  // Menempelkan stream ke elemen video SETELAH loading selesai dan elemen sudah ada di layar
-  useEffect(() => {
-    if (!loadingCamera && !error && stream && videoRef.current) {
-      videoRef.current.srcObject = stream;
-    }
-  }, [loadingCamera, error, stream]);
 
   const handleCapture = () => {
     if (videoRef.current) {
