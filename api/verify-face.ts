@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import Groq from "groq-sdk";
 
 // Konfigurasi Vercel untuk menaikkan batas ukuran payload gambar
 export const config = {
@@ -15,16 +15,16 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  const genaiApiKey = process.env.GEMINI_API_KEY;
+  const groqApiKey = process.env.GROQ_API_KEY;
   
-  if (!genaiApiKey) {
+  if (!groqApiKey) {
     return res.status(500).json({
-      error: "Gemini API key is not configured on the server.",
+      error: "Groq API key is not configured on the server.",
     });
   }
 
-  const ai = new GoogleGenAI({
-    apiKey: genaiApiKey,
+  const groq = new Groq({
+    apiKey: groqApiKey,
   });
 
   try {
@@ -44,29 +44,33 @@ export default async function handler(req: any, res: any) {
     const live = cleanBase64(livePhoto);
     const profile = cleanBase64(profilePhoto);
 
-    // Analisis dengan Gemini
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: [
-        { inlineData: { data: live.data, mimeType: live.mimeType } },
-        { inlineData: { data: profile.data, mimeType: profile.mimeType } },
-        "Bandingkan kedua foto wajah di atas. Foto 1 adalah foto live karyawan saat melakukan absen mandiri via smartphone. Foto 2 adalah foto referensi profil karyawan yang telah terdaftar. Verifikasi apakah wajah di Foto 1 adalah orang yang sama dengan yang ada di Foto 2. Mohon analisa landmark wajah utama seperti mata, hidung, mulut, bentuk wajah, kerutan, dan kemiripan biometrik lainnya meskipun ada perbedaan pencahayaan atau ekspresi. Berikan respon akhir Anda dalam format JSON terstruktur.",
+    const liveUrl = `data:${live.mimeType};base64,${live.data}`;
+    const profileUrl = `data:${profile.mimeType};base64,${profile.data}`;
+
+    // Analisis dengan Groq (Llama 3.2 Vision)
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.2-11b-vision-preview",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Anda adalah AI pemverifikasi wajah. Bandingkan dua foto wajah ini. Apakah ini orang yang sama? Evaluasi kemiripannya secara ketat. Anda WAJIB merespons HANYA dengan format JSON valid yang memiliki 3 properti: 'verified' (boolean true/false), 'confidence' (angka 0-100), dan 'reason' (string alasan maksimal 2 kalimat)." },
+            { type: "image_url", image_url: { url: liveUrl } },
+            { type: "image_url", image_url: { url: profileUrl } }
+          ]
+        }
       ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            verified: { type: Type.BOOLEAN },
-            confidence: { type: Type.NUMBER },
-            reason: { type: Type.STRING },
-          },
-          required: ["verified", "confidence", "reason"],
-        },
-      },
+      temperature: 0.1
     });
 
-    const responseText = response.text || "{}";
+    let responseText = completion.choices[0]?.message?.content || "{}";
+    
+    // Bersihkan teks jika AI menyelipkan blok markdown (contoh: ```json ... ```)
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      responseText = jsonMatch[0];
+    }
+
     const resultObj = JSON.parse(responseText.trim());
 
     return res.status(200).json({ success: true, comparison: resultObj });
@@ -74,8 +78,8 @@ export default async function handler(req: any, res: any) {
     console.error("Error during face verification:", error);
     
     let errorMsg = error.message || String(error);
-    if (errorMsg.includes("503") || errorMsg.includes("high demand") || errorMsg.includes("UNAVAILABLE")) {
-      errorMsg = "Server AI Google sedang sibuk. Silakan coba klik tombol absen sekali lagi dalam beberapa detik.";
+    if (errorMsg.includes("429") || errorMsg.includes("rate limit")) {
+      errorMsg = "Server AI sedang sibuk atau melampaui limit. Silakan coba lagi.";
     }
 
     return res.status(500).json({
