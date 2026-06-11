@@ -38,11 +38,13 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
   const [currentEmployee, setCurrentEmployee] = useState<Employee | null>(null);
   const [isLinking, setIsLinking] = useState(false);
   const [selectedEmpId, setSelectedEmpId] = useState('');
+  const [linkedIds, setLinkedIds] = useState<Set<string>>(new Set());
   
   // GPS State
   const [gpsLocation, setGpsLocation] = useState<GeolocationPosition | null>(null);
   const [gpsError, setGpsError] = useState('');
   const [gpsLoading, setGpsLoading] = useState(true);
+  const [isSuspiciousGPS, setIsSuspiciousGPS] = useState(false);
 
   // Camera Capture Modal
   const [showCamera, setShowCamera] = useState(false);
@@ -83,6 +85,21 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
     return unsubscribe;
   }, [userProfile.employeeId, userProfile.name]);
 
+  // Fetch already linked profiles
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'users'), (snap) => {
+      const ids = new Set<string>();
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (data.employeeId && d.id !== userProfile.uid) {
+          ids.add(data.employeeId);
+        }
+      });
+      setLinkedIds(ids);
+    });
+    return unsub;
+  }, [userProfile.uid]);
+
   // Track coordinates
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -96,6 +113,16 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
         setGpsLocation(position);
         setGpsError('');
         setGpsLoading(false);
+
+        // Anti Fake-GPS Heuristic Check
+        const { altitude, speed, heading } = position.coords;
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        
+        if (isMobile && altitude === null && speed === null && heading === null) {
+          setIsSuspiciousGPS(true); // Kemungkinan besar menggunakan aplikasi Fake GPS
+        } else {
+          setIsSuspiciousGPS(false);
+        }
       },
       (err) => {
         console.error("GPS Error:", err);
@@ -164,6 +191,10 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
   };
 
   const startAttendanceCheck = (type: 'in' | 'out') => {
+    if (isSuspiciousGPS) {
+      alert("Akses ditolak. Sistem mendeteksi indikasi penggunaan Aplikasi Fake GPS / Mock Location.");
+      return;
+    }
     if (!isWithinRadius) {
       alert(`Anda berada di luar radius presensi kantor! Jarak Anda: ${distance ? distance.toFixed(1) : '---'}m (Radius max: ${officeConfig.radius}m)`);
       return;
@@ -290,7 +321,7 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
                   className="bg-slate-900 border border-slate-700 text-slate-100 rounded-xl p-3 focus:border-cyan-500 outline-none text-xs flex-1"
                 >
                   <option value="">-- Pilih Profil Anda --</option>
-                  {employees.map(emp => (
+                  {employees.filter(emp => !linkedIds.has(emp.id)).map(emp => (
                     <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
                   ))}
                 </select>
@@ -352,9 +383,11 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
                   }`}>
                     <div className="flex justify-between items-center mb-3">
                       <span className="text-[10px] font-mono font-bold tracking-widest uppercase">
-                        Sinyal GPS Akurat
+                        {isSuspiciousGPS ? 'GPS Dicurigai Palsu' : 'Sinyal GPS Akurat'}
                       </span>
-                      {isWithinRadius ? (
+                      {isSuspiciousGPS ? (
+                        <ShieldAlert size={16} className="text-red-400" />
+                      ) : isWithinRadius ? (
                         <CheckCircle2 size={16} className="text-emerald-400 animate-pulse" />
                       ) : (
                         <Lock size={16} className="text-red-400" />
@@ -378,6 +411,15 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
                         {isWithinRadius ? '✓ Berada Di Dalam Radius Kantor' : '⚠ Di Luar Radius Kantor (Min 5m)'}
                       </div>
                     </div>
+                  </div>
+                )}
+                
+                {isSuspiciousGPS && !gpsLoading && !gpsError && (
+                  <div className="p-3 bg-red-500/15 border border-red-500/30 rounded-xl flex items-start gap-2.5 mt-3 shadow-lg shadow-red-500/10">
+                    <ShieldAlert size={16} className="text-red-400 shrink-0 mt-0.5" />
+                    <span className="text-[10px] text-red-400 leading-relaxed font-bold">
+                      Akses Dikunci: Terdeteksi penggunaan Fake GPS. Harap matikan aplikasi Mock Location atau melangkah ke luar ruangan untuk mendapatkan sinyal GPS fisik (3D).
+                    </span>
                   </div>
                 )}
               </div>
@@ -449,9 +491,9 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
                     <div className="flex gap-4">
                       <button
                         onClick={() => startAttendanceCheck('in')}
-                        disabled={gpsLoading || !isWithinRadius}
+                        disabled={gpsLoading || !isWithinRadius || isSuspiciousGPS}
                         className={`flex-1 flex flex-col items-center justify-center py-4 px-3 rounded-2xl border font-bold transition-all ${
-                          !isWithinRadius 
+                          !isWithinRadius || isSuspiciousGPS
                             ? 'bg-slate-800/40 border-slate-750 text-slate-500 cursor-not-allowed' 
                             : 'bg-emerald-600/10 hover:bg-emerald-600/20 border-emerald-500/30 text-emerald-400 active:scale-95'
                         }`}
@@ -462,9 +504,9 @@ export default function MobileAttendanceView({ userProfile, officeConfig }: Mobi
 
                       <button
                         onClick={() => startAttendanceCheck('out')}
-                        disabled={gpsLoading || !isWithinRadius}
+                        disabled={gpsLoading || !isWithinRadius || isSuspiciousGPS}
                         className={`flex-1 flex flex-col items-center justify-center py-4 px-3 rounded-2xl border font-bold transition-all ${
-                          !isWithinRadius 
+                          !isWithinRadius || isSuspiciousGPS
                             ? 'bg-slate-800/40 border-slate-750 text-slate-500 cursor-not-allowed' 
                             : 'bg-amber-600/10 hover:bg-amber-600/20 border-amber-500/30 text-amber-400 active:scale-95'
                         }`}

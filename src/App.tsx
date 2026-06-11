@@ -10,7 +10,8 @@ import {
   setDoc,
   getDocs,
   where,
-  limit
+  limit,
+  deleteDoc
 } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth, signInWithGoogle, logOut } from './lib/firebase';
@@ -33,7 +34,8 @@ import {
   MapPin,
   Lock,
   Compass,
-  Loader2
+  Loader2,
+  User
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -45,7 +47,7 @@ import MobileAttendanceView from './components/MobileAttendanceView';
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [activeTab, setActiveTab] = useState<'attendance' | 'employees' | 'device' | 'users' | 'absen-mobile'>('attendance');
+  const [activeTab, setActiveTab] = useState<'attendance' | 'employees' | 'device' | 'users' | 'absen-mobile' | 'my-profile'>('attendance');
   const [loading, setLoading] = useState(true);
   const [deviceConfig, setDeviceConfig] = useState<DeviceConfig | null>(null);
   const [isDeviceConnected, setIsDeviceConnected] = useState<boolean>(false);
@@ -271,24 +273,32 @@ export default function App() {
               label="Absen Mobile" 
             />
             <NavButton 
-              active={activeTab === 'employees'} 
-              onClick={() => setActiveTab('employees')}
-              icon={<Users size={20} />}
-              label="Karyawan" 
-            />
-            <NavButton 
-              active={activeTab === 'device'} 
-              onClick={() => setActiveTab('device')}
-              icon={<Settings size={20} />}
-              label="Perangkat" 
+              active={activeTab === 'my-profile'} 
+              onClick={() => setActiveTab('my-profile')}
+              icon={<User size={20} />}
+              label="Profil Saya" 
             />
             {profile && profile.role === 'admin' && (
-              <NavButton 
-                active={activeTab === 'users'} 
-                onClick={() => setActiveTab('users')}
-                icon={<Users size={20} />}
-                label="Persetujuan" 
-              />
+              <>
+                <NavButton 
+                  active={activeTab === 'employees'} 
+                  onClick={() => setActiveTab('employees')}
+                  icon={<Users size={20} />}
+                  label="Karyawan" 
+                />
+                <NavButton 
+                  active={activeTab === 'device'} 
+                  onClick={() => setActiveTab('device')}
+                  icon={<Settings size={20} />}
+                  label="Perangkat" 
+                />
+                <NavButton 
+                  active={activeTab === 'users'} 
+                  onClick={() => setActiveTab('users')}
+                  icon={<Users size={20} />}
+                  label="Persetujuan" 
+                />
+              </>
             )}
           </div>
         </div>
@@ -311,7 +321,7 @@ export default function App() {
             <div>
               <p className="text-[10px] uppercase tracking-[0.2em] font-mono text-slate-500 mb-1">DASHBOARD</p>
               <h2 className="text-4xl font-bold text-slate-100">
-                {activeTab === 'attendance' ? 'Log Kehadiran' : activeTab === 'absen-mobile' ? 'Absen Smartphone' : activeTab === 'employees' ? 'Daftar Karyawan' : activeTab === 'device' ? 'Konfigurasi Alat' : 'Persetujuan Akun'}
+                {activeTab === 'attendance' ? 'Log Kehadiran' : activeTab === 'absen-mobile' ? 'Absen Smartphone' : activeTab === 'employees' ? 'Daftar Karyawan' : activeTab === 'device' ? 'Konfigurasi Alat' : activeTab === 'users' ? 'Persetujuan Akun' : 'Profil Saya'}
               </h2>
             </div>
             <div className="hidden md:flex items-center gap-4 text-right">
@@ -337,10 +347,11 @@ export default function App() {
 
         <AnimatePresence mode="wait">
           {activeTab === 'attendance' && <AttendanceView key="att" />}
-          {activeTab === 'employees' && <EmployeeView key="emp" />}
-          {activeTab === 'device' && <DeviceView key="dev" config={deviceConfig} isConnected={isDeviceConnected} officeConfig={officeConfig} profile={profile} />}
-          {activeTab === 'users' && <UsersApprovalView key="usr" />}
+          {activeTab === 'employees' && profile?.role === 'admin' && <EmployeeView key="emp" />}
+          {activeTab === 'device' && profile?.role === 'admin' && <DeviceView key="dev" config={deviceConfig} isConnected={isDeviceConnected} officeConfig={officeConfig} profile={profile} />}
+          {activeTab === 'users' && profile?.role === 'admin' && <UsersApprovalView key="usr" />}
           {activeTab === 'absen-mobile' && profile && <MobileAttendanceView key="mob" userProfile={profile} officeConfig={officeConfig} />}
+          {activeTab === 'my-profile' && profile && <MyProfileView key="prof" profile={profile} />}
         </AnimatePresence>
       </main>
     </div>
@@ -511,7 +522,6 @@ function EmployeeView() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newFpId, setNewFpId] = useState('');
   const [newPos, setNewPos] = useState('');
 
   useEffect(() => {
@@ -523,17 +533,18 @@ function EmployeeView() {
     return unsubscribe;
   }, []);
 
+  const nextFpId = employees.length > 0 ? Math.max(...employees.map(e => e.fingerprintId)) + 1 : 1;
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       await addDoc(collection(db, 'employees'), {
         name: newName,
-        fingerprintId: parseInt(newFpId),
+        fingerprintId: nextFpId,
         position: newPos,
         createdAt: serverTimestamp()
       });
       setNewName('');
-      setNewFpId('');
       setNewPos('');
       setShowAdd(false);
     } catch (err) {
@@ -585,15 +596,12 @@ function EmployeeView() {
             />
           </div>
           <div className="space-y-2">
-            <label className="text-[10px] uppercase font-mono tracking-widest text-slate-500">FP ID (1-127)</label>
+            <label className="text-[10px] uppercase font-mono tracking-widest text-slate-500">Auto FP ID</label>
             <input 
-              required
-              type="number"
-              min="1"
-              max="127"
-              value={newFpId}
-              onChange={e => setNewFpId(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 focus:border-cyan-500 outline-none text-sm"
+              disabled
+              value={nextFpId}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none text-sm font-mono font-bold text-cyan-400"
+              title="ID dihasilkan otomatis oleh sistem"
             />
           </div>
           <button type="submit" className="bg-cyan-600 text-white p-3 rounded-xl hover:bg-cyan-500 transition-all font-bold">SAVE RECORD</button>
@@ -624,7 +632,7 @@ function EmployeeView() {
                 onClick={async () => {
                   if (confirm('Hapus karyawan ini?')) {
                     try {
-                      await addDoc(collection(db, 'employees', emp.id, '_DELETED_'), {});
+                      await deleteDoc(doc(db, 'employees', emp.id));
                     } catch (e) {}
                   }
                 }}
@@ -635,6 +643,119 @@ function EmployeeView() {
             </div>
           </div>
         ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function MyProfileView({ profile }: { profile: UserProfile }) {
+  const [logs, setLogs] = useState<Attendance[]>([]);
+  const [employeeData, setEmployeeData] = useState<Employee | null>(null);
+
+  useEffect(() => {
+    if (!profile.employeeId) return;
+    
+    // Ambil data profil karyawan yang terhubung
+    const unsubEmp = onSnapshot(doc(db, 'employees', profile.employeeId), (docSnap) => {
+      if (docSnap.exists()) {
+        setEmployeeData({ id: docSnap.id, ...docSnap.data() } as Employee);
+      }
+    });
+
+    // Ambil riwayat absen khusus untuk ID karyawan ini
+    const q = query(collection(db, 'attendance'), where('employeeId', '==', profile.employeeId));
+    const unsubLogs = onSnapshot(q, (snapshot) => {
+      const l = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance));
+      // Urutkan dari yang paling baru di sisi klien (agar tidak perlu buat composite index di Firebase)
+      l.sort((a, b) => {
+         const timeA = a.timestamp?.toMillis?.() || 0;
+         const timeB = b.timestamp?.toMillis?.() || 0;
+         return timeB - timeA;
+      });
+      setLogs(l);
+    });
+
+    return () => {
+      unsubEmp();
+      unsubLogs();
+    };
+  }, [profile.employeeId]);
+
+  if (!profile.employeeId) {
+    return (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bento-card border-amber-500/30 text-center py-16">
+        <User size={48} className="mx-auto text-amber-500 mb-4 opacity-50" />
+        <h2 className="text-xl font-bold text-slate-100 mb-2">Profil Belum Terhubung</h2>
+        <p className="text-slate-400 text-sm">Akun Anda belum dikaitkan dengan data karyawan manapun.</p>
+        <p className="text-xs text-slate-500 mt-2">Buka menu <strong className="text-slate-300">Absen Mobile</strong> untuk menghubungkan profil Anda.</p>
+      </motion.div>
+    );
+  }
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className="space-y-6"
+    >
+      {/* Header Profile Card */}
+      <div className="bento-card flex flex-col md:flex-row gap-6 items-center md:items-start border-cyan-500/20">
+        <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-cyan-500/50 shrink-0 bg-slate-800 flex items-center justify-center">
+          {employeeData?.facePhoto ? (
+              <img src={employeeData.facePhoto} alt="Profil" className="w-full h-full object-cover" />
+          ) : (
+              <User size={40} className="text-slate-500" />
+          )}
+        </div>
+        <div className="flex-1 text-center md:text-left">
+          <h2 className="text-2xl font-bold text-slate-100">{employeeData?.name || profile.name}</h2>
+          <p className="text-sm font-mono text-cyan-400 uppercase tracking-widest mb-4">{employeeData?.position || 'KARYAWAN'}</p>
+          
+          <div className="flex flex-wrap gap-4 justify-center md:justify-start">
+            <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2">
+              <p className="text-[10px] text-slate-500 uppercase font-mono tracking-widest">ID Sidik Jari</p>
+              <p className="font-bold font-mono text-slate-200">#{employeeData?.fingerprintId?.toString().padStart(3, '0') || '---'}</p>
+            </div>
+            <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2">
+              <p className="text-[10px] text-slate-500 uppercase font-mono tracking-widest">Total Rekam Absen</p>
+              <p className="font-bold font-mono text-emerald-400">{logs.length} Kali</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Logs List */}
+      <div className="bento-card">
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-6">Riwayat Presensi Pribadi</h3>
+        <div className="space-y-3">
+          {logs.length === 0 ? (
+            <div className="p-10 text-center text-slate-500 italic font-mono text-sm">Belum ada riwayat kehadiran yang tercatat.</div>
+          ) : logs.map((log) => (
+            <div key={log.id} className="flex items-center gap-4 p-4 bg-slate-900/40 rounded-xl border border-slate-700/30 hover:border-cyan-500/30 transition-all">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${log.type === 'in' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                {log.type === 'in' ? 'IN' : 'OUT'}
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-slate-100">
+                  {log.type === 'in' ? 'Check In' : 'Check Out'}
+                </div>
+                <div className="text-[10px] text-slate-500 flex gap-2 items-center">
+                  {log.isMobile ? <Smartphone size={10} /> : <Fingerprint size={10} />}
+                  {log.isMobile ? 'Melalui Mobile / GPS' : 'Melalui Scanner Alat'}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-bold font-mono text-slate-200">
+                  {log.timestamp?.toDate ? format(log.timestamp.toDate(), 'HH:mm:ss') : '--:--:--'}
+                </div>
+                <div className="text-[10px] text-cyan-400 font-mono tracking-widest uppercase mt-0.5">
+                  {log.timestamp?.toDate ? format(log.timestamp.toDate(), 'dd MMM yyyy') : '---'}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </motion.div>
   );
@@ -1031,7 +1152,7 @@ function UsersApprovalView() {
                 <div className={`p-3 rounded-2xl ${u.role === 'admin' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-slate-700/50 text-slate-400'}`}>
                   <Users size={24} />
                 </div>
-                <div className="text-right">
+                <div className="text-right flex items-center gap-2">
                   <span className={`inline-block text-[9px] font-bold tracking-widest font-mono uppercase px-2.5 py-1 rounded-full ${
                     u.status === 'approved' 
                       ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
@@ -1041,6 +1162,23 @@ function UsersApprovalView() {
                   }`}>
                     {u.status}
                   </span>
+                  {!isSelf && (
+                    <button 
+                      onClick={async () => {
+                        if (confirm('Hapus akses login akun ini secara permanen?')) {
+                          try {
+                            await deleteDoc(doc(db, 'users', u.uid));
+                          } catch (e) {
+                            console.error(e);
+                          }
+                        }
+                      }}
+                      className="p-1.5 rounded-lg text-slate-500 hover:bg-red-500/10 hover:text-red-400 transition-colors"
+                      title="Hapus Akses Login"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </div>
               </div>
 
