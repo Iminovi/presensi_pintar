@@ -602,6 +602,7 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
   const [loadingCamera, setLoadingCamera] = useState(true);
 
   useEffect(() => {
+    let localStream: MediaStream | null = null;
     async function startCamera() {
       try {
         setLoadingCamera(true);
@@ -613,6 +614,7 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
           }, 
           audio: false 
         });
+        localStream = s;
         setStream(s);
         setLoadingCamera(false);
       } catch (err: any) {
@@ -625,8 +627,8 @@ function WebcamCapture({ onCapture, onClose }: { onCapture: (base64: string) => 
     startCamera();
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
