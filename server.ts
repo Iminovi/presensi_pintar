@@ -55,9 +55,9 @@ async function startServer() {
       const live = cleanBase64(livePhoto);
       const profile = cleanBase64(profilePhoto);
 
-      // Perform facial comparison with Gemini 3.5 Flash
+      // Perform facial comparison with Gemini 2.0 Flash
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-2.0-flash",
         contents: [
           {
             inlineData: {
@@ -102,14 +102,8 @@ async function startServer() {
       return res.json({ success: true, comparison: resultObj });
     } catch (error: any) {
       console.error("Error during face verification:", error);
-      
-      let errorMsg = error.message || String(error);
-      if (errorMsg.includes("503") || errorMsg.includes("high demand") || errorMsg.includes("UNAVAILABLE")) {
-        errorMsg = "Server AI Google sedang sibuk. Silakan coba klik tombol absen sekali lagi dalam beberapa detik.";
-      }
-
       return res.status(500).json({
-        error: errorMsg,
+        error: "Terjadi kesalahan pada verifikasi wajah AI: " + (error.message || error),
       });
     }
   });
