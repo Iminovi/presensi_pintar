@@ -49,7 +49,7 @@ export default async function handler(req: any, res: any) {
 
     // Analisis dengan Groq (Llama 3.2 Vision)
     const completion = await groq.chat.completions.create({
-      model: "llama-3.2-90b-vision-preview",
+      model: "llama-3.2-11b-vision-instruct",
       messages: [
         {
           role: "user",
