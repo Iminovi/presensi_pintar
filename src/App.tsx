@@ -53,11 +53,12 @@ export default function App() {
   const [isDeviceConnected, setIsDeviceConnected] = useState<boolean>(false);
 
   // Office GPS Geofence boundary configuration
-  const [officeConfig, setOfficeConfig] = useState<OfficeConfig>({
+  const [officeConfig, setOfficeConfig] = useState<any>({
     latitude: -6.175392,
     longitude: 106.827153,
     radius: 5,
-    locationName: "Kantor Pusat"
+    locationName: "Kantor Pusat",
+    checkInTime: "08:00"
   });
 
   // Track office config from cloud
@@ -65,13 +66,14 @@ export default function App() {
     if (!user) return;
     const unsubOffice = onSnapshot(doc(db, 'office', 'config'), (snap) => {
       if (snap.exists()) {
-        setOfficeConfig(snap.data() as OfficeConfig);
+        setOfficeConfig(snap.data());
       } else {
         setDoc(doc(db, 'office', 'config'), {
           latitude: -6.175392,
           longitude: 106.827153,
           radius: 5,
-          locationName: "Kantor Pusat"
+          locationName: "Kantor Pusat",
+          checkInTime: "08:00"
         });
       }
     });
@@ -346,12 +348,12 @@ export default function App() {
         </header>
 
         <AnimatePresence mode="wait">
-          {activeTab === 'attendance' && <AttendanceView key="att" />}
+          {activeTab === 'attendance' && <AttendanceView key="att" officeConfig={officeConfig} />}
           {activeTab === 'employees' && profile?.role === 'admin' && <EmployeeView key="emp" />}
           {activeTab === 'device' && profile?.role === 'admin' && <DeviceView key="dev" config={deviceConfig} isConnected={isDeviceConnected} officeConfig={officeConfig} profile={profile} />}
           {activeTab === 'users' && profile?.role === 'admin' && <UsersApprovalView key="usr" />}
           {activeTab === 'absen-mobile' && profile && <MobileAttendanceView key="mob" userProfile={profile} officeConfig={officeConfig} />}
-          {activeTab === 'my-profile' && profile && <MyProfileView key="prof" profile={profile} />}
+          {activeTab === 'my-profile' && profile && <MyProfileView key="prof" profile={profile} officeConfig={officeConfig} />}
         </AnimatePresence>
       </main>
     </div>
@@ -403,7 +405,7 @@ function NavButton({ active, onClick, icon, label }: { active: boolean, onClick:
   );
 }
 
-function AttendanceView() {
+function AttendanceView({ officeConfig }: { officeConfig: any }) {
   const [logs, setLogs] = useState<Attendance[]>([]);
 
   useEffect(() => {
@@ -428,6 +430,18 @@ function AttendanceView() {
       const timeStr = dateObj ? format(dateObj, 'HH:mm:ss') : '--:--:--';
       const typeStr = log.type === 'in' ? 'Check In' : 'Check Out';
       
+      // Logika Penentuan Terlambat Dinamis
+      let statusStr = 'Terverifikasi';
+      if (log.type === 'in' && dateObj) {
+        const h = dateObj.getHours();
+        const m = dateObj.getMinutes();
+        const [limitH, limitM] = (officeConfig?.checkInTime || '08:00').split(':').map(Number);
+        if (h > limitH || (h === limitH && m > limitM)) statusStr = 'Terlambat';
+        else statusStr = 'Tepat Waktu';
+      } else if (log.type === 'out') {
+        statusStr = 'Pulang';
+      }
+
       // Escape names and handle possible commas
       const escapedName = log.employeeName ? `"${log.employeeName.replace(/"/g, '""')}"` : '""';
       
@@ -438,7 +452,7 @@ function AttendanceView() {
         dateStr,
         timeStr,
         typeStr,
-        'Terverifikasi'
+        statusStr
       ];
     });
 
@@ -494,7 +508,17 @@ function AttendanceView() {
       <div className="space-y-3">
         {logs.length === 0 ? (
           <div className="p-10 text-center text-slate-500 italic">Belum ada aktivitas hari ini</div>
-        ) : logs.map((log) => (
+        ) : logs.map((log) => {
+          const dateObj = log.timestamp?.toDate ? log.timestamp.toDate() : null;
+          let isLate = false;
+          if (log.type === 'in' && dateObj) {
+            const h = dateObj.getHours();
+            const m = dateObj.getMinutes();
+            const [limitH, limitM] = (officeConfig?.checkInTime || '08:00').split(':').map(Number);
+            if (h > limitH || (h === limitH && m > limitM)) isLate = true;
+          }
+          
+          return (
           <div key={log.id} className="flex items-center gap-4 p-4 bg-slate-900/40 rounded-xl border border-slate-700/30 hover:border-cyan-500/30 transition-all group">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs ${log.type === 'in' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
               {log.employeeName.substring(0, 2).toUpperCase()}
@@ -507,12 +531,18 @@ function AttendanceView() {
             </div>
             <div className="text-right">
               <div className="text-sm font-semibold font-mono text-slate-200">
-                {log.timestamp?.toDate ? format(log.timestamp.toDate(), 'HH:mm:ss') : '--:--:--'}
+                {dateObj ? format(dateObj, 'HH:mm:ss') : '--:--:--'}
               </div>
-              <div className="text-[10px] text-emerald-500 uppercase font-bold tracking-widest">Verified</div>
+              {log.type === 'in' ? (
+                <div className={`text-[10px] uppercase font-bold tracking-widest mt-1 ${isLate ? 'text-red-500' : 'text-emerald-500'}`}>
+                  {isLate ? 'Terlambat' : 'Tepat Waktu'}
+                </div>
+              ) : (
+                <div className="text-[10px] text-cyan-500 uppercase font-bold tracking-widest mt-1">Selesai</div>
+              )}
             </div>
           </div>
-        ))}
+        )})}
       </div>
     </motion.div>
   );
@@ -648,7 +678,7 @@ function EmployeeView() {
   );
 }
 
-function MyProfileView({ profile }: { profile: UserProfile }) {
+function MyProfileView({ profile, officeConfig }: { profile: UserProfile, officeConfig: any }) {
   const [logs, setLogs] = useState<Attendance[]>([]);
   const [employeeData, setEmployeeData] = useState<Employee | null>(null);
 
@@ -731,7 +761,17 @@ function MyProfileView({ profile }: { profile: UserProfile }) {
         <div className="space-y-3">
           {logs.length === 0 ? (
             <div className="p-10 text-center text-slate-500 italic font-mono text-sm">Belum ada riwayat kehadiran yang tercatat.</div>
-          ) : logs.map((log) => (
+          ) : logs.map((log) => {
+            const dateObj = log.timestamp?.toDate ? log.timestamp.toDate() : null;
+            let isLate = false;
+            if (log.type === 'in' && dateObj) {
+              const h = dateObj.getHours();
+              const m = dateObj.getMinutes();
+              const [limitH, limitM] = (officeConfig?.checkInTime || '08:00').split(':').map(Number);
+              if (h > limitH || (h === limitH && m > limitM)) isLate = true;
+            }
+
+            return (
             <div key={log.id} className="flex items-center gap-4 p-4 bg-slate-900/40 rounded-xl border border-slate-700/30 hover:border-cyan-500/30 transition-all">
               <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${log.type === 'in' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
                 {log.type === 'in' ? 'IN' : 'OUT'}
@@ -747,34 +787,41 @@ function MyProfileView({ profile }: { profile: UserProfile }) {
               </div>
               <div className="text-right">
                 <div className="text-sm font-bold font-mono text-slate-200">
-                  {log.timestamp?.toDate ? format(log.timestamp.toDate(), 'HH:mm:ss') : '--:--:--'}
+                  {dateObj ? format(dateObj, 'HH:mm:ss') : '--:--:--'}
                 </div>
-                <div className="text-[10px] text-cyan-400 font-mono tracking-widest uppercase mt-0.5">
-                  {log.timestamp?.toDate ? format(log.timestamp.toDate(), 'dd MMM yyyy') : '---'}
+                <div className="text-[10px] font-mono tracking-widest uppercase mt-1 flex flex-col items-end gap-1">
+                  <span className="text-cyan-400">{dateObj ? format(dateObj, 'dd MMM yyyy') : '---'}</span>
+                  {log.type === 'in' && (
+                    <span className={`px-1.5 py-0.5 rounded font-bold ${isLate ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                      {isLate ? 'Terlambat' : 'Tepat Waktu'}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
-          ))}
+          )})}
         </div>
       </div>
     </motion.div>
   );
 }
 
-function DeviceView({ config, isConnected, officeConfig, profile }: { config: DeviceConfig | null, isConnected: boolean, officeConfig: OfficeConfig, profile: UserProfile | null, key?: any }) {
-  const [latInput, setLatInput] = useState(officeConfig.latitude.toString());
-  const [lngInput, setLngInput] = useState(officeConfig.longitude.toString());
-  const [radiusInput, setRadiusInput] = useState(officeConfig.radius.toString());
+function DeviceView({ config, isConnected, officeConfig, profile }: { config: DeviceConfig | null, isConnected: boolean, officeConfig: any, profile: UserProfile | null, key?: any }) {
+  const [latInput, setLatInput] = useState(officeConfig.latitude?.toString() || '-6.175392');
+  const [lngInput, setLngInput] = useState(officeConfig.longitude?.toString() || '106.827153');
+  const [radiusInput, setRadiusInput] = useState(officeConfig.radius?.toString() || '5');
   const [locNameInput, setLocNameInput] = useState(officeConfig.locationName || 'Kantor Pusat');
+  const [checkInTimeInput, setCheckInTimeInput] = useState(officeConfig.checkInTime || '08:00');
   const [isUpdating, setIsUpdating] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
 
   useEffect(() => {
     if (officeConfig) {
-      setLatInput(officeConfig.latitude.toString());
-      setLngInput(officeConfig.longitude.toString());
-      setRadiusInput(officeConfig.radius.toString());
+      setLatInput(officeConfig.latitude?.toString() || '-6.175392');
+      setLngInput(officeConfig.longitude?.toString() || '106.827153');
+      setRadiusInput(officeConfig.radius?.toString() || '5');
       setLocNameInput(officeConfig.locationName || 'Kantor Pusat');
+      setCheckInTimeInput(officeConfig.checkInTime || '08:00');
     }
   }, [officeConfig]);
 
@@ -793,7 +840,7 @@ function DeviceView({ config, isConnected, officeConfig, profile }: { config: De
   const handleUpdateOffice = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || profile.role !== 'admin') {
-      alert("Hanya Administrator yang diperbolehkan mengubah jangkauan GPS kantor!");
+        alert("Hanya Administrator yang diperbolehkan mengubah pengaturan kantor!");
       return;
     }
     setIsUpdating(true);
@@ -802,9 +849,10 @@ function DeviceView({ config, isConnected, officeConfig, profile }: { config: De
         latitude: parseFloat(latInput),
         longitude: parseFloat(lngInput),
         radius: parseFloat(radiusInput),
-        locationName: locNameInput
+          locationName: locNameInput,
+          checkInTime: checkInTimeInput
       }, { merge: true });
-      alert("Koordinat GPS dan radius kehadiran kantor berhasil diperbarui!");
+        alert("Pengaturan konfigurasi kantor berhasil diperbarui!");
     } catch (err) {
       console.error("Error updating office location:", err);
       alert("Gagal memperbarui konfigurasi kantor.");
@@ -996,18 +1044,31 @@ function DeviceView({ config, isConnected, officeConfig, profile }: { config: De
               </div>
             </div>
 
-            <div>
-              <label className="text-[10px] font-mono text-slate-400 block mb-1 uppercase">Radius Valid (Meter)</label>
-              <input
-                disabled={!isAdmin}
-                type="number"
-                min="2"
-                max="500"
-                required
-                value={radiusInput}
-                onChange={(e) => setRadiusInput(e.target.value)}
-                className="w-full text-xs font-mono bg-slate-900 border border-slate-750 p-2.5 rounded-xl text-slate-200 outline-none focus:border-cyan-500/50"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-mono text-slate-400 block mb-1 uppercase">Radius Valid (Meter)</label>
+                <input
+                  disabled={!isAdmin}
+                  type="number"
+                  min="2"
+                  max="500"
+                  required
+                  value={radiusInput}
+                  onChange={(e) => setRadiusInput(e.target.value)}
+                  className="w-full text-xs font-mono bg-slate-900 border border-slate-750 p-2.5 rounded-xl text-slate-200 outline-none focus:border-cyan-500/50"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-mono text-slate-400 block mb-1 uppercase">Batas Jam Masuk</label>
+                <input
+                  disabled={!isAdmin}
+                  type="time"
+                  required
+                  value={checkInTimeInput}
+                  onChange={(e) => setCheckInTimeInput(e.target.value)}
+                  className="w-full text-xs font-mono bg-slate-900 border border-slate-750 p-2.5 rounded-xl text-slate-200 outline-none focus:border-cyan-500/50"
+                />
+              </div>
             </div>
 
             {isAdmin && (
