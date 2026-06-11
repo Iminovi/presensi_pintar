@@ -46,7 +46,7 @@ export default async function handler(req: any, res: any) {
 
     // Analisis dengan Gemini
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-1.5-flash",
       contents: [
         { inlineData: { data: live.data, mimeType: live.mimeType } },
         { inlineData: { data: profile.data, mimeType: profile.mimeType } },
@@ -72,8 +72,14 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({ success: true, comparison: resultObj });
   } catch (error: any) {
     console.error("Error during face verification:", error);
+    
+    let errorMsg = error.message || String(error);
+    if (errorMsg.includes("503") || errorMsg.includes("high demand") || errorMsg.includes("UNAVAILABLE")) {
+      errorMsg = "Server AI Google sedang sibuk. Silakan coba klik tombol absen sekali lagi dalam beberapa detik.";
+    }
+
     return res.status(500).json({
-      error: "Terjadi kesalahan pada verifikasi wajah AI: " + (error.message || error),
+      error: errorMsg,
     });
   }
 }
