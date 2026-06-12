@@ -35,7 +35,8 @@ import {
   Lock,
   Compass,
   Loader2,
-  User
+  User,
+  Printer
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -250,9 +251,9 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0f172a] text-slate-100 flex flex-col md:flex-row">
+    <div className="min-h-screen bg-[#0f172a] text-slate-100 flex flex-col md:flex-row print:bg-white print:text-black">
       {/* Sidebar */}
-      <nav className="w-full md:w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between">
+      <nav className="w-full md:w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between print:hidden">
         <div>
           <div className="flex items-center gap-3 mb-10">
             <div className="bg-cyan-500 p-2 rounded-xl">
@@ -317,8 +318,8 @@ export default function App() {
       </nav>
 
       {/* Main Content */}
-      <main className="flex-1 p-6 md:p-12 overflow-y-auto">
-        <header className="mb-10">
+      <main className="flex-1 p-6 md:p-12 overflow-y-auto print:p-0 print:overflow-visible">
+        <header className="mb-10 print:hidden">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-[10px] uppercase tracking-[0.2em] font-mono text-slate-500 mb-1">DASHBOARD</p>
@@ -407,17 +408,66 @@ function NavButton({ active, onClick, icon, label }: { active: boolean, onClick:
 
 function AttendanceView({ officeConfig }: { officeConfig: any }) {
   const [logs, setLogs] = useState<Attendance[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [selectedEmpId, setSelectedEmpId] = useState<string>('all');
+  const [workDays, setWorkDays] = useState<number>(22);
 
   useEffect(() => {
-    const q = query(collection(db, 'attendance'), orderBy('timestamp', 'desc'), limit(50));
+    const unsub = onSnapshot(collection(db, 'employees'), (snap) => {
+      setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() } as Employee)));
+    });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    let q;
+    if (selectedEmpId === 'all') {
+      q = query(collection(db, 'attendance'), orderBy('timestamp', 'desc'), limit(50));
+    } else {
+      q = query(collection(db, 'attendance'), where('employeeId', '==', selectedEmpId));
+    }
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const l = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance));
+      if (selectedEmpId !== 'all') {
+        l.sort((a, b) => {
+           const timeA = a.timestamp?.toMillis?.() || 0;
+           const timeB = b.timestamp?.toMillis?.() || 0;
+           return timeB - timeA;
+        });
+      }
       setLogs(l);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'attendance');
     });
     return unsubscribe;
-  }, []);
+  }, [selectedEmpId]);
+
+  const employeeSummary = React.useMemo(() => {
+    if (selectedEmpId !== 'all') {
+      const emp = employees.find(e => e.id === selectedEmpId);
+      if (!emp) return null;
+      const inLogs = logs.filter(l => l.type === 'in');
+      const uniqueDays = new Set(inLogs.map(l => l.timestamp?.toDate ? format(l.timestamp.toDate(), 'yyyy-MM-dd') : ''));
+      uniqueDays.delete(''); // Hapus jika ada data kosong
+      const presentDays = uniqueDays.size;
+      const percentage = workDays > 0 ? Math.round((presentDays / workDays) * 100) : 0;
+      return { presentDays, percentage };
+    }
+    return null;
+  }, [logs, selectedEmpId, employees, workDays]);
+
+  const allSummary = React.useMemo(() => {
+    if (selectedEmpId !== 'all') return [];
+    return employees.map(emp => {
+      const inLogs = logs.filter(l => l.employeeId === emp.id && l.type === 'in');
+      const uniqueDays = new Set(inLogs.map(l => l.timestamp?.toDate ? format(l.timestamp.toDate(), 'yyyy-MM-dd') : ''));
+      uniqueDays.delete('');
+      const presentDays = uniqueDays.size;
+      const percentage = workDays > 0 ? Math.round((presentDays / workDays) * 100) : 0;
+      return { ...emp, presentDays, percentage };
+    }).filter(emp => emp.presentDays > 0); // Hanya tampilkan yang memiliki log absen
+  }, [logs, selectedEmpId, employees, workDays]);
 
   const handleExportCSV = () => {
     if (logs.length === 0) return;
@@ -479,31 +529,115 @@ function AttendanceView({ officeConfig }: { officeConfig: any }) {
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className="bento-card overflow-hidden"
+      className="bento-card overflow-hidden print:border-none print:shadow-none print:bg-transparent print:p-0"
     >
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 print:hidden">
         <div>
           <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Recent Presence Logs</h2>
           <p className="text-[10px] text-slate-500 font-mono mt-1">Total: {logs.length} Log Kehadiran</p>
         </div>
-        <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-start">
-          <button
-            onClick={handleExportCSV}
-            disabled={logs.length === 0}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider font-mono transition-all border shrink-0 ${
-              logs.length === 0
-                ? 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
-                : 'bg-cyan-600/10 hover:bg-cyan-600/20 border-cyan-500/30 text-cyan-400 hover:text-white cursor-pointer active:scale-95'
-            }`}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 w-full sm:w-auto">
+            <span className="text-xs text-slate-400 font-mono whitespace-nowrap">Target Hari Kerja:</span>
+            <input 
+              type="number"
+              min="1"
+              value={workDays}
+              onChange={(e) => setWorkDays(Number(e.target.value))}
+              className="bg-transparent text-slate-100 text-xs focus:outline-none w-12 font-bold font-mono text-center"
+            />
+          </div>
+          <select 
+            value={selectedEmpId}
+            onChange={(e) => setSelectedEmpId(e.target.value)}
+            className="bg-slate-900 border border-slate-700 text-slate-100 rounded-xl p-2 text-xs focus:border-cyan-500 outline-none w-full sm:w-auto"
           >
-            <Download size={14} />
-            Export to CSV
-          </button>
-          <div className="flex gap-1 shrink-0">
-            {[1, 2, 3, 4].map(i => <div key={i} className={`h-1.5 w-6 rounded-full ${i < 4 ? 'bg-cyan-500' : 'bg-slate-700'}`}></div>)}
+            <option value="all">Semua Karyawan</option>
+            {employees.map(emp => (
+              <option key={emp.id} value={emp.id}>{emp.name}</option>
+            ))}
+          </select>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => window.print()}
+              disabled={logs.length === 0}
+              className="flex items-center justify-center gap-2 flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider font-mono transition-all border bg-slate-800 border-slate-700 text-slate-300 hover:text-white cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Printer size={14} />
+              PDF
+            </button>
+            <button
+              onClick={handleExportCSV}
+              disabled={logs.length === 0}
+              className={`flex items-center justify-center gap-2 flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider font-mono transition-all border ${
+                logs.length === 0
+                  ? 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
+                  : 'bg-cyan-600/10 hover:bg-cyan-600/20 border-cyan-500/30 text-cyan-400 hover:text-white cursor-pointer active:scale-95'
+              }`}
+            >
+              <Download size={14} />
+              CSV
+            </button>
           </div>
         </div>
       </div>
+
+      <div className="hidden print:block mb-6">
+        <h1 className="text-2xl font-bold text-black mb-1">Laporan Kehadiran Karyawan</h1>
+        <p className="text-sm text-black">
+          Karyawan: <strong>{selectedEmpId === 'all' ? 'Semua Karyawan' : employees.find(e => e.id === selectedEmpId)?.name}</strong>
+        </p>
+        <p className="text-sm text-black mb-4">
+          Waktu Cetak: {format(new Date(), 'dd MMMM yyyy, HH:mm')}
+        </p>
+        <hr className="border-black mb-4" />
+      </div>
+
+      {/* Tampilan Ringkasan PDF untuk 1 Karyawan */}
+      {selectedEmpId !== 'all' && employeeSummary && (
+        <div className="hidden print:block mb-6 p-4 border border-black rounded-xl bg-slate-50">
+          <div className="grid grid-cols-3 gap-4 text-center divide-x divide-black/20">
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-600 mb-1">Target Hari Kerja</p>
+              <p className="text-2xl font-bold text-black">{workDays} <span className="text-sm font-normal">Hari</span></p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-600 mb-1">Total Kehadiran</p>
+              <p className="text-2xl font-bold text-black">{employeeSummary.presentDays} <span className="text-sm font-normal">Hari</span></p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-600 mb-1">Persentase</p>
+              <p className="text-2xl font-bold text-black">{employeeSummary.percentage}%</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tampilan Ringkasan PDF untuk Semua Karyawan */}
+      {selectedEmpId === 'all' && allSummary.length > 0 && (
+        <div className="hidden print:block mb-6">
+          <h3 className="text-md font-bold mb-2 text-black uppercase border-b border-black pb-1">Ringkasan Persentase Kehadiran</h3>
+          <table className="w-full text-left border-collapse border border-black mb-4 text-sm">
+            <thead>
+              <tr className="bg-slate-100">
+                <th className="border border-black p-2 font-bold">Nama Karyawan</th>
+                <th className="border border-black p-2 font-bold text-center">Hadir / Target</th>
+                <th className="border border-black p-2 font-bold text-center">Persentase</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allSummary.map(emp => (
+                <tr key={emp.id}>
+                  <td className="border border-black p-2">{emp.name}</td>
+                  <td className="border border-black p-2 text-center">{emp.presentDays} / {workDays} Hari</td>
+                  <td className="border border-black p-2 text-center font-bold">{emp.percentage}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <hr className="border-black mb-4 mt-6" />
+        </div>
+      )}
       
       <div className="space-y-3">
         {logs.length === 0 ? (
@@ -519,26 +653,27 @@ function AttendanceView({ officeConfig }: { officeConfig: any }) {
           }
           
           return (
-          <div key={log.id} className="flex items-center gap-4 p-4 bg-slate-900/40 rounded-xl border border-slate-700/30 hover:border-cyan-500/30 transition-all group">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs ${log.type === 'in' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+          <div key={log.id} className="flex items-center gap-4 p-4 bg-slate-900/40 rounded-xl border border-slate-700/30 hover:border-cyan-500/30 transition-all group print:bg-transparent print:border-none print:border-b print:border-slate-300 print:rounded-none print:p-2">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs print:hidden ${log.type === 'in' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
               {log.employeeName.substring(0, 2).toUpperCase()}
             </div>
             <div className="flex-1">
-              <div className="text-sm font-semibold text-slate-100">{log.employeeName}</div>
-              <div className="text-[10px] text-slate-500 uppercase tracking-wider font-mono">
+              <div className="text-sm font-semibold text-slate-100 print:text-black">{log.employeeName}</div>
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider font-mono print:text-slate-600">
                 {log.type === 'in' ? 'Check In' : 'Check Out'}
               </div>
             </div>
             <div className="text-right">
-              <div className="text-sm font-semibold font-mono text-slate-200">
+              <div className="text-sm font-semibold font-mono text-slate-200 print:text-black">
+                <span className="hidden print:inline mr-2">{dateObj ? format(dateObj, 'dd MMM yyyy') : ''}</span>
                 {dateObj ? format(dateObj, 'HH:mm:ss') : '--:--:--'}
               </div>
               {log.type === 'in' ? (
-                <div className={`text-[10px] uppercase font-bold tracking-widest mt-1 ${isLate ? 'text-red-500' : 'text-emerald-500'}`}>
+                <div className={`text-[10px] uppercase font-bold tracking-widest mt-1 ${isLate ? 'text-red-500 print:text-red-700' : 'text-emerald-500 print:text-emerald-700'}`}>
                   {isLate ? 'Terlambat' : 'Tepat Waktu'}
                 </div>
               ) : (
-                <div className="text-[10px] text-cyan-500 uppercase font-bold tracking-widest mt-1">Selesai</div>
+                <div className="text-[10px] text-cyan-500 print:text-cyan-700 uppercase font-bold tracking-widest mt-1">Selesai</div>
               )}
             </div>
           </div>
